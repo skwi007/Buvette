@@ -106,6 +106,11 @@ alors qu'il n'en reste que sept.
 Si une autre caisse écoule le dernier article entre l'ouverture de l'écran et la validation,
 l'encaissement est refusé avec un message clair, et rien n'est enregistré.
 
+**Consommations offertes.** L'interrupteur *Offert* sert aux bénévoles et aux organisateurs :
+la commande sort du stock mais n'entre pas dans la recette attendue en caisse. Le champ de
+rendu de monnaie disparaît, et l'interrupteur se remet seul à zéro après validation — un
+oubli coûterait une recette sans que personne ne s'en aperçoive.
+
 ### 3. Récapituler
 
 La page **Historique** donne, pour chaque produit, la quantité vendue et le montant, puis :
@@ -113,8 +118,24 @@ La page **Historique** donne, pour chaque produit, la quantité vendue et le mon
 - le **total des ventes**,
 - le **montant attendu dans la caisse** (fond de caisse + ventes), à comparer au comptage réel.
 
+Quand des consommations ont été offertes, le tableau distingue trois colonnes : ce qui a
+été **vendu**, ce qui a été **offert**, et le total **sorti du stock**. Seul le vendu entre
+dans le montant attendu en caisse.
+
 Le détail commande par commande permet d'annuler une saisie erronée. Le récapitulatif
 s'imprime, ou s'exporte en CSV pour Excel (séparateur `;`, décimales à la virgule).
+
+### 4. Compter la caisse
+
+En fin de journée, saisir dans **Comptage de la caisse** ce que contient réellement le
+tiroir, fond de caisse compris. L'application affiche l'écart :
+
+- **La caisse tombe juste** — rien à signaler ;
+- **Il manque X €** — rendu de monnaie erroné, commande oubliée, consommation offerte
+  non saisie ;
+- **Excédent de X €** — commande encaissée deux fois, ou monnaie mal rendue en votre faveur.
+
+Le montant compté et l'écart sont conservés, et figurent dans l'export CSV pour le trésorier.
 
 ## Points de fonctionnement à connaître
 
@@ -125,7 +146,10 @@ s'imprime, ou s'exporte en CSV pour Excel (séparateur `;`, décimales à la vir
 - **Clôturer** une buvette bloque toute nouvelle vente sans rien effacer. L'historique
   reste consultable et la buvette peut être rouverte.
 - **Annuler une commande la supprime définitivement** des totaux : c'est le seul moyen
-  de corriger une erreur de caisse.
+  de corriger une erreur de caisse. Si le comptage était déjà saisi, un écart apparaît
+  aussitôt — c'est voulu, il signale que les deux ne concordent plus.
+- **Une commande offerte garde la trace de sa valeur**, pour savoir en fin de journée ce
+  que les gratuités ont représenté.
 
 ## Sauvegarde
 
@@ -143,7 +167,7 @@ l'association n'ont pas à être publiées avec le code.
 dotnet test
 ```
 
-116 tests xUnit couvrent les règles métier, dans `tests/Buvette.Tests/`.
+148 tests xUnit couvrent les règles métier, dans `tests/Buvette.Tests/`.
 Ils tournent sur un vrai moteur SQLite, recréé pour chaque test : les cascades de
 suppression, les migrations et le stockage des montants sont donc réellement exercés,
 pas simulés. Les tests de concurrence utilisent un fichier temporaire, seule façon de
@@ -156,7 +180,9 @@ Ils couvrent en priorité les points où une erreur coûterait de l'argent à l'
 - l'exactitude au centime, sans dérive de virgule flottante ;
 - le refus d'encaisser sur une buvette clôturée ou au-delà du stock ;
 - l'absence totale d'écriture quand un encaissement est refusé ;
-- l'impossibilité de vendre plus que le stock, même depuis plusieurs caisses à la fois.
+- l'impossibilité de vendre plus que le stock, même depuis plusieurs caisses à la fois ;
+- les gratuités hors recette mais bien décomptées du stock ;
+- le calcul de l'écart de caisse et son signe.
 
 ## Structure
 

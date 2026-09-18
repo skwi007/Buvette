@@ -67,6 +67,34 @@ else
                 </div>
             </div>
         </div>
+        @if (recap.TotalOffert > 0)
+        {
+            <div class="col-6 col-lg-3">
+                <div class="card chiffre h-100">
+                    <div class="card-body">
+                        <div class="chiffre-libelle">Offert</div>
+                        <div class="chiffre-valeur text-secondary">@recap.TotalOffert.ToString("C2")</div>
+                        <div class="text-secondary small">
+                            @recap.NombreOffertes commande@(recap.NombreOffertes > 1 ? "s" : ""), hors recette
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        @if (recap.Compte)
+        {
+            <div class="col-6 col-lg-3">
+                <div class="card chiffre h-100 @(recap.EcartSignificatif ? "border-warning" : "border-success")">
+                    <div class="card-body">
+                        <div class="chiffre-libelle">Écart de caisse</div>
+                        <div class="chiffre-valeur @(recap.EcartSignificatif ? "text-warning-emphasis" : "text-success")">
+                            @(recap.Ecart!.Value >= 0 ? "+" : "")@recap.Ecart.Value.ToString("C2")
+                        </div>
+                        <div class="text-secondary small">compté @recap.Evenement.MontantCompte!.Value.ToString("C2")</div>
+                    </div>
+                </div>
+            </div>
+        }
     </div>
 
     <h2 class="h4 mb-3">Ce qui a été vendu</h2>
@@ -85,6 +113,11 @@ else
                         <th scope="col" class="text-end">Prix unitaire</th>
                         <th scope="col" class="text-end">Quantité vendue</th>
                         <th scope="col" class="text-end">Montant</th>
+                        @if (recap.TotalOffert > 0)
+                        {
+                            <th scope="col" class="text-end">Offerts</th>
+                            <th scope="col" class="text-end">Sorti du stock</th>
+                        }
                     </tr>
                 </thead>
                 <tbody>
@@ -95,6 +128,13 @@ else
                             <td class="text-end">@ligne.PrixUnitaire.ToString("C2")</td>
                             <td class="text-end fw-semibold">@ligne.Quantite</td>
                             <td class="text-end">@ligne.Montant.ToString("C2")</td>
+                            @if (recap.TotalOffert > 0)
+                            {
+                                <td class="text-end @(ligne.QuantiteOfferte > 0 ? "text-secondary" : "text-body-tertiary")">
+                                    @(ligne.QuantiteOfferte > 0 ? ligne.QuantiteOfferte.ToString() : "—")
+                                </td>
+                                <td class="text-end">@ligne.QuantiteTotale</td>
+                            }
                         </tr>
                     }
                 </tbody>
@@ -102,19 +142,98 @@ else
                     <tr class="fw-bold fs-5">
                         <td colspan="3">Total des ventes</td>
                         <td class="text-end">@recap.TotalVentes.ToString("C2")</td>
+                        @if (recap.TotalOffert > 0)
+                        {
+                            <td colspan="2"></td>
+                        }
                     </tr>
+                    @if (recap.TotalOffert > 0)
+                    {
+                        <tr class="text-secondary">
+                            <td colspan="3">
+                                Offert (@recap.NombreOffertes commande@(recap.NombreOffertes > 1 ? "s" : ""))
+                                — non encaissé
+                            </td>
+                            <td class="text-end">@recap.TotalOffert.ToString("C2")</td>
+                            <td colspan="2"></td>
+                        </tr>
+                    }
                     <tr>
                         <td colspan="3">Fond de caisse</td>
                         <td class="text-end">@recap.Evenement.FondDeCaisse.ToString("C2")</td>
+                        @if (recap.TotalOffert > 0)
+                        {
+                            <td colspan="2"></td>
+                        }
                     </tr>
                     <tr class="fw-bold fs-5 table-success">
                         <td colspan="3">Montant attendu dans la caisse</td>
                         <td class="text-end">@recap.TotalEnCaisse.ToString("C2")</td>
+                        @if (recap.TotalOffert > 0)
+                        {
+                            <td colspan="2"></td>
+                        }
                     </tr>
                 </tfoot>
             </table>
         </div>
     }
+
+    <h2 class="h4 mb-3">Comptage de la caisse</h2>
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label" for="compte">Montant réellement compté (€)</label>
+                    <input id="compte" class="form-control form-control-lg" type="number" step="0.01" min="0"
+                           inputmode="decimal" placeholder="@recap.TotalEnCaisse.ToString("0.00")"
+                           value="@Prix.PourChamp(montantCompte)"
+                           @onchange="e => montantCompte = Prix.Analyser(e.Value?.ToString())" />
+                    <div class="form-text">Fond de caisse et recette compris, tels qu'ils sont dans le tiroir.</div>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary btn-lg w-100" @onclick="EnregistrerComptageAsync">
+                        Enregistrer
+                    </button>
+                </div>
+                @if (recap.Compte)
+                {
+                    <div class="col-md-5">
+                        @if (!recap.EcartSignificatif)
+                        {
+                            <div class="alert alert-success mb-0 py-2">
+                                <strong>La caisse tombe juste.</strong>
+                            </div>
+                        }
+                        else if (recap.Ecart is decimal e && e < 0)
+                        {
+                            <div class="alert alert-danger mb-0 py-2">
+                                Il <strong>manque @((-e).ToString("C2"))</strong> par rapport à l'attendu.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="alert alert-warning mb-0 py-2">
+                                <strong>Excédent de @(recap.Ecart!.Value.ToString("C2"))</strong> par rapport à l'attendu.
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            @if (recap.Compte && recap.EcartSignificatif)
+            {
+                <p class="text-secondary small mb-0 mt-3">
+                    Avant de chercher plus loin : une consommation offerte non saisie, une erreur de
+                    rendu de monnaie ou une commande encaissée deux fois expliquent la plupart des écarts.
+                    Le détail des commandes ci-dessous permet de retrouver une saisie erronée.
+                </p>
+            }
+            @if (comptageEnregistre)
+            {
+                <p class="text-success mb-0 mt-2">Comptage enregistré.</p>
+            }
+        </div>
+    </div>
 
     <h2 class="h4 mb-3">
         Détail des commandes
@@ -148,11 +267,19 @@ else
                     <tbody>
                         @foreach (var c in commandes)
                         {
-                            <tr @key="c.Id">
+                            <tr @key="c.Id" class="@(c.Offerte ? "table-secondary" : "")">
                                 <td>@c.Id</td>
                                 <td>@c.DateHeure.ToString("HH:mm")</td>
-                                <td>@string.Join(", ", c.Lignes.Select(l => $"{l.Quantite} × {l.NomProduit}"))</td>
-                                <td class="text-end">@c.Total.ToString("C2")</td>
+                                <td>
+                                    @string.Join(", ", c.Lignes.Select(l => $"{l.Quantite} × {l.NomProduit}"))
+                                    @if (c.Offerte)
+                                    {
+                                        <span class="badge text-bg-secondary ms-2">offert</span>
+                                    }
+                                </td>
+                                <td class="text-end @(c.Offerte ? "text-secondary text-decoration-line-through" : "")">
+                                    @c.Total.ToString("C2")
+                                </td>
                                 <td class="text-end">
                                     @if (annulationId == c.Id)
                                     {
@@ -186,6 +313,8 @@ else
     private bool introuvable;
     private bool detailOuvert;
     private int? annulationId;
+    private decimal? montantCompte;
+    private bool comptageEnregistre;
 
     protected override async Task OnParametersSetAsync() => await ChargerAsync();
 
@@ -194,6 +323,14 @@ else
         recap = await Service.RecapitulatifAsync(Id);
         introuvable = recap is null;
         commandes = recap is null ? [] : await Service.ListerCommandesAsync(Id);
+        montantCompte = recap?.Evenement.MontantCompte;
+    }
+
+    private async Task EnregistrerComptageAsync()
+    {
+        await Service.EnregistrerComptageAsync(Id, montantCompte);
+        comptageEnregistre = true;
+        await ChargerAsync();
     }
 
     private async Task AnnulerAsync(int commandeId)

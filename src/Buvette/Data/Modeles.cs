@@ -20,6 +20,13 @@ public class Evenement
     /// <summary>Un événement clôturé n'accepte plus de nouvelles ventes.</summary>
     public bool Cloture { get; set; }
 
+    /// <summary>
+    /// Ce qui a réellement été compté dans le tiroir en fin de journée, ou <c>null</c>
+    /// tant que le comptage n'a pas été fait. Conservé pour garder trace de l'écart.
+    /// </summary>
+    [Range(0, 1000000, ErrorMessage = "Le montant compté doit être positif.")]
+    public decimal? MontantCompte { get; set; }
+
     public List<Produit> Produits { get; set; } = [];
     public List<Commande> Commandes { get; set; } = [];
 }
@@ -63,8 +70,17 @@ public class Commande
 
     public DateTime DateHeure { get; set; } = DateTime.Now;
 
-    /// <summary>Total recalculé à l'encaissement et figé ici.</summary>
+    /// <summary>
+    /// Valeur de la commande, recalculée à l'encaissement et figée ici. Renseignée même
+    /// pour une commande offerte, afin de savoir ce que les gratuités ont représenté.
+    /// </summary>
     public decimal Total { get; set; }
+
+    /// <summary>
+    /// Commande offerte (bénévoles, organisateurs) : elle consomme le stock mais
+    /// n'entre pas dans la recette, et n'a donc pas à se retrouver dans le tiroir.
+    /// </summary>
+    public bool Offerte { get; set; }
 
     public List<LigneCommande> Lignes { get; set; } = [];
 }

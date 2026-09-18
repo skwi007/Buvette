@@ -186,3 +186,8 @@ h1:focus {
 .blazor-error-boundary::after {
     content: "Une erreur est survenue."
 }
+
+/* Une commande offerte ne doit pas se confondre visuellement avec un encaissement. */
+.panier .total.offert {
+    color: #5a6673;
+}

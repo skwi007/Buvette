@@ -58,15 +58,24 @@ app.MapGet("/export/{id:int}", async (int id, BuvetteService service) =>
     if (recap is null) return Results.NotFound();
 
     var csv = new StringBuilder();
-    csv.AppendLine("Produit;Prix unitaire;Quantite vendue;Montant");
+    csv.AppendLine("Produit;Prix unitaire;Quantite vendue;Montant;Quantite offerte;Valeur offerte;Sorti du stock");
     foreach (var ligne in recap.Produits)
-        csv.AppendLine($"{Echapper(ligne.Nom)};{ligne.PrixUnitaire:0.00};{ligne.Quantite};{ligne.Montant:0.00}");
+        csv.AppendLine($"{Echapper(ligne.Nom)};{ligne.PrixUnitaire:0.00};{ligne.Quantite};{ligne.Montant:0.00};" +
+                       $"{ligne.QuantiteOfferte};{ligne.MontantOffert:0.00};{ligne.QuantiteTotale}");
 
     csv.AppendLine();
-    csv.AppendLine($"Nombre de commandes;;;{recap.NombreCommandes}");
+    csv.AppendLine($"Nombre de commandes encaissees;;;{recap.NombreCommandes}");
     csv.AppendLine($"Total des ventes;;;{recap.TotalVentes:0.00}");
+    csv.AppendLine($"Commandes offertes;;;{recap.NombreOffertes}");
+    csv.AppendLine($"Valeur offerte (hors recette);;;{recap.TotalOffert:0.00}");
     csv.AppendLine($"Fond de caisse;;;{recap.Evenement.FondDeCaisse:0.00}");
     csv.AppendLine($"Total attendu en caisse;;;{recap.TotalEnCaisse:0.00}");
+
+    if (recap.Evenement.MontantCompte is decimal compte)
+    {
+        csv.AppendLine($"Montant compte;;;{compte:0.00}");
+        csv.AppendLine($"Ecart;;;{recap.Ecart!.Value:0.00}");
+    }
 
     // BOM UTF-8 : sans lui, Excel affiche « tarte flambée » en mojibake.
     var contenu = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();

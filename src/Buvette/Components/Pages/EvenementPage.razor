@@ -107,7 +107,7 @@ else
                         </td>
                         <td>
                             <input class="form-control" type="number" step="0.01" min="0" inputmode="decimal"
-                                   value="@p.Prix.ToString("0.##")" aria-label="Prix de @p.Nom"
+                                   value="@Prix.PourChamp(p.Prix)" aria-label="Prix de @p.Nom"
                                    @onchange="e => ModifierPrix(p, e.Value?.ToString())" />
                         </td>
                         <td>
@@ -161,7 +161,7 @@ else
                     <td>
                         <input class="form-control" type="number" step="0.01" min="0" placeholder="8,00"
                                inputmode="decimal" aria-label="Prix du nouveau produit"
-                               value="@(nouveauPrix?.ToString("0.##") ?? "")"
+                               value="@Prix.PourChamp(nouveauPrix)"
                                @onchange="e => nouveauPrix = Prix.Analyser(e.Value?.ToString())"
                                @onkeydown="TouchePressee" />
                     </td>

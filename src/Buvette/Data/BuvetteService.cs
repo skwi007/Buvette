@@ -3,8 +3,22 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Buvette.Data;
 
-/// <summary>Ligne du récapitulatif de fin de journée : un produit, ce qui en a été vendu.</summary>
-public record LigneRecap(string Nom, decimal PrixUnitaire, int Quantite, decimal Montant);
+/// <summary>
+/// Ligne du récapitulatif de fin de journée : un produit, ce qui en a été vendu et ce
+/// qui en a été offert. Les deux sont séparés car seul l'encaissé doit se retrouver
+/// dans le tiroir, alors que les deux ont consommé du stock.
+/// </summary>
+public record LigneRecap(
+    string Nom,
+    decimal PrixUnitaire,
+    int Quantite,
+    decimal Montant,
+    int QuantiteOfferte,
+    decimal MontantOffert)
+{
+    /// <summary>Tout ce qui est sorti du stock, payé ou non.</summary>
+    public int QuantiteTotale => Quantite + QuantiteOfferte;
+}
 
 /// <summary>
 /// Un produit tel que l'écran de caisse en a besoin : son tarif et ce qu'il en reste.
@@ -25,12 +39,26 @@ public record Recapitulatif(
     Evenement Evenement,
     IReadOnlyList<LigneRecap> Produits,
     int NombreCommandes,
-    decimal TotalVentes)
+    decimal TotalVentes,
+    int NombreOffertes,
+    decimal TotalOffert)
 {
     /// <summary>Ce qui doit se trouver physiquement dans la caisse : fond de caisse + recettes.</summary>
     public decimal TotalEnCaisse => Evenement.FondDeCaisse + TotalVentes;
 
     public decimal PanierMoyen => NombreCommandes == 0 ? 0m : TotalVentes / NombreCommandes;
+
+    /// <summary>Le comptage a-t-il été fait ?</summary>
+    public bool Compte => Evenement.MontantCompte is not null;
+
+    /// <summary>
+    /// Écart entre le tiroir et l'attendu : positif s'il y a plus que prévu, négatif s'il
+    /// manque. <c>null</c> tant que personne n'a compté.
+    /// </summary>
+    public decimal? Ecart => Evenement.MontantCompte is decimal compte ? compte - TotalEnCaisse : null;
+
+    /// <summary>Un écart de quelques centimes n'a pas à être signalé comme un problème.</summary>
+    public bool EcartSignificatif => Ecart is decimal e && Math.Abs(e) >= 0.01m;
 }
 
 /// <summary>
@@ -161,6 +189,21 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
                 .SetProperty(e => e.Date, evenement.Date)
                 .SetProperty(e => e.FondDeCaisse, evenement.FondDeCaisse)
                 .SetProperty(e => e.Cloture, evenement.Cloture));
+        // MontantCompte est volontairement absent : il n'appartient pas au formulaire de
+        // réglages, et l'inclure permettrait à un écran resté ouvert d'écraser un comptage
+        // saisi entre-temps depuis la page Historique.
+    }
+
+    /// <summary>
+    /// Enregistre ce qui a été compté dans le tiroir. <c>null</c> efface le comptage,
+    /// par exemple pour le refaire après avoir corrigé une erreur de saisie.
+    /// </summary>
+    public async Task EnregistrerComptageAsync(int evenementId, decimal? montantCompte)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        await db.Evenements
+            .Where(e => e.Id == evenementId)
+            .ExecuteUpdateAsync(s => s.SetProperty(e => e.MontantCompte, montantCompte));
     }
 
     public async Task SupprimerEvenementAsync(int id)
@@ -231,7 +274,8 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
     /// tentative, qui relit les stocks à jour et aboutit soit à la vente, soit à un franc
     /// « épuisé ». Sans cette reprise, une vente pourtant possible échouerait.
     /// </remarks>
-    public async Task<Commande> EncaisserAsync(int evenementId, IReadOnlyDictionary<int, int> quantites)
+    public async Task<Commande> EncaisserAsync(
+        int evenementId, IReadOnlyDictionary<int, int> quantites, bool offerte = false)
     {
         const int tentativesMax = 5;
 
@@ -239,7 +283,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
         {
             try
             {
-                return await EncaisserUneFoisAsync(evenementId, quantites);
+                return await EncaisserUneFoisAsync(evenementId, quantites, offerte);
             }
             catch (SqliteException ex) when (EstConflitDEcriture(ex) && tentative < tentativesMax)
             {
@@ -253,7 +297,8 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
     private static bool EstConflitDEcriture(SqliteException ex) =>
         ex.SqliteErrorCode is 5 or 6;   // SQLITE_BUSY, SQLITE_LOCKED
 
-    private async Task<Commande> EncaisserUneFoisAsync(int evenementId, IReadOnlyDictionary<int, int> quantites)
+    private async Task<Commande> EncaisserUneFoisAsync(
+        int evenementId, IReadOnlyDictionary<int, int> quantites, bool offerte)
     {
         await using var db = await factory.CreateDbContextAsync();
         await using var transaction = await db.Database.BeginTransactionAsync();
@@ -272,7 +317,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
             .ToDictionaryAsync(p => p.Id);
 
         var vendus = await VendusParProduitAsync(db, evenementId);
-        var commande = new Commande { EvenementId = evenementId, DateHeure = DateTime.Now };
+        var commande = new Commande { EvenementId = evenementId, DateHeure = DateTime.Now, Offerte = offerte };
 
         foreach (var id in ids)
         {
@@ -333,6 +378,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
 
         var lignes = await db.Lignes
             .Where(l => l.Commande!.EvenementId == evenementId)
+            .Select(l => new { l.NomProduit, l.PrixUnitaire, l.Quantite, l.Commande!.Offerte })
             .ToListAsync();
 
         // Un même produit vendu à deux prix différents (tarif corrigé en cours de journée)
@@ -342,14 +388,26 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
             .Select(g => new LigneRecap(
                 g.Key.NomProduit,
                 g.Key.PrixUnitaire,
-                g.Sum(l => l.Quantite),
-                g.Sum(l => l.SousTotal)))
+                g.Where(l => !l.Offerte).Sum(l => l.Quantite),
+                g.Where(l => !l.Offerte).Sum(l => l.PrixUnitaire * l.Quantite),
+                g.Where(l => l.Offerte).Sum(l => l.Quantite),
+                g.Where(l => l.Offerte).Sum(l => l.PrixUnitaire * l.Quantite)))
             .OrderByDescending(r => r.Montant)
+            .ThenByDescending(r => r.QuantiteTotale)
             .ThenBy(r => r.Nom)
             .ToList();
 
-        var nbCommandes = await db.Commandes.CountAsync(c => c.EvenementId == evenementId);
+        var commandes = await db.Commandes
+            .Where(c => c.EvenementId == evenementId)
+            .Select(c => c.Offerte)
+            .ToListAsync();
 
-        return new Recapitulatif(evenement, recap, nbCommandes, recap.Sum(r => r.Montant));
+        return new Recapitulatif(
+            evenement,
+            recap,
+            commandes.Count(offerte => !offerte),
+            recap.Sum(r => r.Montant),
+            commandes.Count(offerte => offerte),
+            recap.Sum(r => r.MontantOffert));
     }
 }

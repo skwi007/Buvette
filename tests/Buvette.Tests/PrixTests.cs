@@ -48,6 +48,54 @@ public class PrixTests
     }
 
     [Theory]
+    [InlineData("8.5", "8.5")]
+    [InlineData("1.5", "1.5")]     // « 1,50 € » doit sortir en 1.5, sinon le champ s'affiche vide
+    [InlineData("8", "8")]
+    [InlineData("0", "0")]
+    [InlineData("1234.56", "1234.56")]
+    public void PourChamp_formate_toujours_avec_un_point_decimal(string valeur, string attendu)
+    {
+        // Un champ HTML type="number" rejette « 1,5 » : le navigateur vide alors la case,
+        // et le bénévole voit un prix disparaître sans comprendre pourquoi.
+        var montant = decimal.Parse(valeur, CultureInfo.InvariantCulture);
+
+        Assert.Equal(attendu, Prix.PourChamp(montant));
+        Assert.DoesNotContain(",", Prix.PourChamp(montant));
+    }
+
+    [Fact]
+    public void PourChamp_rend_une_chaine_vide_pour_une_valeur_absente()
+    {
+        Assert.Equal("", Prix.PourChamp(null));
+    }
+
+    [Theory]
+    [InlineData("fr-FR")]
+    [InlineData("en-US")]
+    [InlineData("de-DE")]
+    public void PourChamp_ne_depend_pas_de_la_culture_du_poste(string culture)
+    {
+        var precedente = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo(culture);
+            Assert.Equal("1.5", Prix.PourChamp(1.5m));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = precedente;
+        }
+    }
+
+    [Fact]
+    public void Un_montant_formate_pour_un_champ_se_relit_a_l_identique()
+    {
+        // La boucle complète : afficher un prix, le recevoir du navigateur, le relire.
+        foreach (var montant in new[] { 0m, 1.5m, 8m, 9.99m, 1234.56m })
+            Assert.Equal(montant, Prix.Analyser(Prix.PourChamp(montant)));
+    }
+
+    [Theory]
     [InlineData("fr-FR")]
     [InlineData("en-US")]
     [InlineData("de-DE")]
