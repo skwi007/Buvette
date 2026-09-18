@@ -72,22 +72,39 @@ dans la caisse avant l'ouverture). Si un événement existe déjà, sa liste de 
 
 Sur la page **Produits**, ajouter chaque article avec son prix :
 
-| Produit | Prix |
-| --- | --- |
-| Tarte flambée nature | 8,00 € |
-| Tarte flambée gratinée | 9,00 € |
-| Jus de pomme | 1,50 € |
-| Bouteille d'eau | 1,00 € |
-| Bretzel | 1,00 € |
+| Produit | Prix | Stock |
+| --- | --- | --- |
+| Tarte flambée nature | 8,00 € | 40 |
+| Tarte flambée gratinée | 9,00 € | 30 |
+| Jus de pomme | 1,50 € | *(vide)* |
+| Bouteille d'eau | 1,00 € | *(vide)* |
+| Bretzel | 1,00 € | 50 |
 
 Les flèches ↑ ↓ règlent l'ordre des boutons sur l'écran de caisse. L'interrupteur
 *En vente* retire un produit épuisé sans toucher aux ventes déjà faites.
+
+**La colonne *Stock* est facultative.** Laissée vide, le produit est illimité — c'est le bon
+choix pour des bouteilles réapprovisionnées au fil de l'eau. Renseignée, elle indique la
+quantité prévue pour la journée, et la colonne *Restant* montre en temps réel ce qu'il
+reste. Modifier ce nombre en cours de journée revient à réapprovisionner : passer les
+bretzels de 50 à 80 remet aussitôt 30 articles en vente.
+
+Le restant n'est jamais stocké, il se déduit des ventes. Annuler une commande saisie par
+erreur remet donc automatiquement les articles à disposition.
 
 ### 2. Encaisser
 
 La page **Caisse** affiche un grand bouton par produit. Chaque appui ajoute une unité ;
 le panier à droite se met à jour avec le total à payer. Un champ *Montant reçu* calcule
 la monnaie à rendre. **Encaisser** enregistre la commande et remet le panier à zéro.
+
+Les produits dont le stock est suivi affichent ce qu'il en reste — *Plus que 7* — en orange
+sous les cinq derniers, puis **ÉPUISÉ** en rouge. Un produit épuisé n'est plus cliquable,
+et le compte tient aussi de ce qui est déjà dans le panier : impossible d'en mettre huit
+alors qu'il n'en reste que sept.
+
+Si une autre caisse écoule le dernier article entre l'ouverture de l'écran et la validation,
+l'encaissement est refusé avec un message clair, et rien n'est enregistré.
 
 ### 3. Récapituler
 
@@ -126,14 +143,20 @@ l'association n'ont pas à être publiées avec le code.
 dotnet test
 ```
 
-91 tests xUnit couvrent les règles métier, dans `tests/Buvette.Tests/`.
-Ils tournent sur une vraie base SQLite en mémoire, recréée pour chaque test : les cascades
-de suppression et le stockage des montants sont donc réellement exercés, pas simulés.
+116 tests xUnit couvrent les règles métier, dans `tests/Buvette.Tests/`.
+Ils tournent sur un vrai moteur SQLite, recréé pour chaque test : les cascades de
+suppression, les migrations et le stockage des montants sont donc réellement exercés,
+pas simulés. Les tests de concurrence utilisent un fichier temporaire, seule façon de
+faire se croiser plusieurs caisses pour de bon.
 
-Ils vérifient notamment les points où une erreur coûterait de l'argent à l'association :
-le total recalculé depuis les prix en base et non depuis l'écran, les prix figés au moment
-de la vente, l'exactitude au centime, le refus d'encaisser sur une buvette clôturée, et le
-fait qu'un encaissement refusé n'écrit rien en base.
+Ils couvrent en priorité les points où une erreur coûterait de l'argent à l'association :
+
+- le total recalculé depuis les prix en base, jamais depuis ce qu'affiche l'écran ;
+- les prix figés au moment de la vente, insensibles aux corrections ultérieures ;
+- l'exactitude au centime, sans dérive de virgule flottante ;
+- le refus d'encaisser sur une buvette clôturée ou au-delà du stock ;
+- l'absence totale d'écriture quand un encaissement est refusé ;
+- l'impossibilité de vendre plus que le stock, même depuis plusieurs caisses à la fois.
 
 ## Structure
 
@@ -147,12 +170,25 @@ fait qu'un encaissement refusé n'écrit rien en base.
 | `src/Buvette/Data/BuvetteService.cs` | Règles métier : encaissement, récapitulatif |
 | `src/Buvette/Data/Prix.cs` | Lecture des montants saisis (virgule ou point) |
 | `src/Buvette/Data/AdressesReseau.cs` | Tri des adresses réseau proposées aux tablettes |
+| `src/Buvette/Data/Migrations/` | Migrations EF Core du schéma |
 | `src/Buvette/Components/Pages/Home.razor` | Liste et création des événements |
 | `src/Buvette/Components/Pages/EvenementPage.razor` | Réglages et carte des produits |
 | `src/Buvette/Components/Pages/Caisse.razor` | Écran de vente |
 | `src/Buvette/Components/Pages/Historique.razor` | Récapitulatif et détail des commandes |
 | `tests/Buvette.Tests/` | Tests xUnit des règles métier |
 
-Le schéma est créé automatiquement au premier démarrage (`EnsureCreated`). Toute
-modification du modèle après une mise en production demandera de passer aux migrations
-EF Core pour ne pas perdre les données existantes.
+## Faire évoluer le schéma
+
+La base est gérée par les **migrations EF Core**, appliquées automatiquement au démarrage.
+Une évolution du modèle s'applique donc à une base contenant déjà les ventes d'un
+événement, sans rien perdre.
+
+Après avoir modifié une classe de `Data/Modeles.cs` :
+
+```console
+dotnet tool restore
+dotnet ef migrations add NomDeLaMigration --project src/Buvette --output-dir Data/Migrations
+```
+
+La migration est appliquée au prochain lancement. Les tests s'exécutent eux aussi sur une
+base créée par migration : une migration oubliée les fait échouer immédiatement.

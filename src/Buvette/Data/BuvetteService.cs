@@ -1,9 +1,24 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace Buvette.Data;
 
 /// <summary>Ligne du récapitulatif de fin de journée : un produit, ce qui en a été vendu.</summary>
 public record LigneRecap(string Nom, decimal PrixUnitaire, int Quantite, decimal Montant);
+
+/// <summary>
+/// Un produit tel que l'écran de caisse en a besoin : son tarif et ce qu'il en reste.
+/// <paramref name="StockRestant"/> vaut <c>null</c> quand le produit n'est pas compté.
+/// </summary>
+public record ProduitEnVente(int Id, string Nom, decimal Prix, int? StockRestant)
+{
+    public bool StockSuivi => StockRestant is not null;
+
+    public bool Epuise => StockRestant is 0;
+
+    /// <summary>Seuil à partir duquel la caisse prévient qu'il ne reste plus grand-chose.</summary>
+    public bool BientotEpuise => StockRestant is > 0 and <= 5;
+}
 
 /// <summary>Récapitulatif complet des ventes d'un événement.</summary>
 public record Recapitulatif(
@@ -16,6 +31,19 @@ public record Recapitulatif(
     public decimal TotalEnCaisse => Evenement.FondDeCaisse + TotalVentes;
 
     public decimal PanierMoyen => NombreCommandes == 0 ? 0m : TotalVentes / NombreCommandes;
+}
+
+/// <summary>
+/// La commande demande plus d'articles qu'il n'en reste. Type dédié pour que l'écran
+/// de caisse puisse afficher le produit fautif et le restant sans analyser un message.
+/// </summary>
+public class StockInsuffisantException(string produit, int restant)
+    : InvalidOperationException(restant == 0
+        ? $"« {produit} » est épuisé."
+        : $"Il ne reste que {restant} « {produit} ».")
+{
+    public string Produit { get; } = produit;
+    public int Restant { get; } = restant;
 }
 
 public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
@@ -46,6 +74,51 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
             .ToListAsync();
     }
 
+    /// <summary>Produits en vente avec le stock restant, pour l'écran de caisse.</summary>
+    public async Task<List<ProduitEnVente>> ProduitsEnVenteAsync(int evenementId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+
+        var produits = await db.Produits
+            .Where(p => p.EvenementId == evenementId && p.Actif)
+            .OrderBy(p => p.Ordre).ThenBy(p => p.Id)
+            .ToListAsync();
+
+        var vendus = await VendusParProduitAsync(db, evenementId);
+
+        return produits.Select(p => new ProduitEnVente(p.Id, p.Nom, p.Prix, Restant(p, vendus))).ToList();
+    }
+
+    /// <summary>Stock restant de chaque produit compté, y compris ceux retirés de la vente.</summary>
+    public async Task<Dictionary<int, int>> StocksRestantsAsync(int evenementId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+
+        var produits = await db.Produits
+            .Where(p => p.EvenementId == evenementId && p.StockInitial != null)
+            .ToListAsync();
+
+        var vendus = await VendusParProduitAsync(db, evenementId);
+
+        return produits.ToDictionary(p => p.Id, p => Restant(p, vendus)!.Value);
+    }
+
+    private static async Task<Dictionary<int, int>> VendusParProduitAsync(BuvetteContext db, int evenementId) =>
+        await db.Lignes
+            .Where(l => l.Commande!.EvenementId == evenementId && l.ProduitId != null)
+            .GroupBy(l => l.ProduitId!.Value)
+            .Select(g => new { ProduitId = g.Key, Quantite = g.Sum(l => l.Quantite) })
+            .ToDictionaryAsync(x => x.ProduitId, x => x.Quantite);
+
+    /// <summary>
+    /// Jamais négatif : baisser le stock sous ce qui a déjà été vendu doit afficher
+    /// « épuisé », pas un nombre négatif incompréhensible au comptoir.
+    /// </summary>
+    private static int? Restant(Produit produit, IReadOnlyDictionary<int, int> vendus) =>
+        produit.StockInitial is int prevu
+            ? Math.Max(0, prevu - vendus.GetValueOrDefault(produit.Id))
+            : null;
+
     public async Task<int> CreerEvenementAsync(Evenement evenement, int? copierProduitsDepuis = null)
     {
         await using var db = await factory.CreateDbContextAsync();
@@ -66,6 +139,9 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
                 Prix = p.Prix,
                 Ordre = p.Ordre,
                 Actif = p.Actif,
+                // La quantité prévue se reconduit comme point de départ : c'est en général
+                // le meilleur repère pour l'édition suivante, quitte à l'ajuster.
+                StockInitial = p.StockInitial,
             }));
             await db.SaveChangesAsync();
         }
@@ -112,7 +188,8 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(p => p.Nom, produit.Nom)
                 .SetProperty(p => p.Prix, produit.Prix)
-                .SetProperty(p => p.Actif, produit.Actif));
+                .SetProperty(p => p.Actif, produit.Actif)
+                .SetProperty(p => p.StockInitial, produit.StockInitial));
     }
 
     public async Task SupprimerProduitAsync(int produitId)
@@ -144,12 +221,42 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
     }
 
     /// <summary>
-    /// Encaisse une commande. Les prix sont relus en base au moment de la validation
-    /// pour qu'un écran de caisse resté ouvert ne puisse pas vendre à un prix périmé.
+    /// Encaisse une commande. Les prix et les stocks sont relus en base au moment de la
+    /// validation, pour qu'un écran de caisse resté ouvert ne vende ni à un prix périmé
+    /// ni un article que la caisse voisine vient d'épuiser.
     /// </summary>
+    /// <remarks>
+    /// Quand deux caisses écrivent en même temps, SQLite refuse celle dont l'instantané est
+    /// périmé. Cette erreur technique n'a aucun sens pour un bénévole : on refait alors la
+    /// tentative, qui relit les stocks à jour et aboutit soit à la vente, soit à un franc
+    /// « épuisé ». Sans cette reprise, une vente pourtant possible échouerait.
+    /// </remarks>
     public async Task<Commande> EncaisserAsync(int evenementId, IReadOnlyDictionary<int, int> quantites)
     {
+        const int tentativesMax = 5;
+
+        for (var tentative = 1; ; tentative++)
+        {
+            try
+            {
+                return await EncaisserUneFoisAsync(evenementId, quantites);
+            }
+            catch (SqliteException ex) when (EstConflitDEcriture(ex) && tentative < tentativesMax)
+            {
+                // Laisse la caisse concurrente terminer, en espaçant un peu plus à chaque essai.
+                await Task.Delay(TimeSpan.FromMilliseconds(15 * tentative));
+            }
+        }
+    }
+
+    /// <summary>Codes SQLite signalant que la base était occupée ou l'instantané périmé.</summary>
+    private static bool EstConflitDEcriture(SqliteException ex) =>
+        ex.SqliteErrorCode is 5 or 6;   // SQLITE_BUSY, SQLITE_LOCKED
+
+    private async Task<Commande> EncaisserUneFoisAsync(int evenementId, IReadOnlyDictionary<int, int> quantites)
+    {
         await using var db = await factory.CreateDbContextAsync();
+        await using var transaction = await db.Database.BeginTransactionAsync();
 
         var evenement = await db.Evenements.FirstOrDefaultAsync(e => e.Id == evenementId)
             ?? throw new InvalidOperationException("Cet événement n'existe plus.");
@@ -164,6 +271,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
             .Where(p => p.EvenementId == evenementId && ids.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id);
 
+        var vendus = await VendusParProduitAsync(db, evenementId);
         var commande = new Commande { EvenementId = evenementId, DateHeure = DateTime.Now };
 
         foreach (var id in ids)
@@ -171,12 +279,16 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
             if (!produits.TryGetValue(id, out var produit))
                 throw new InvalidOperationException("Un produit de la commande a été supprimé entre-temps. Vérifiez la commande.");
 
+            var demande = quantites[id];
+            if (Restant(produit, vendus) is int restant && demande > restant)
+                throw new StockInsuffisantException(produit.Nom, restant);
+
             commande.Lignes.Add(new LigneCommande
             {
                 ProduitId = produit.Id,
                 NomProduit = produit.Nom,
                 PrixUnitaire = produit.Prix,
-                Quantite = quantites[id],
+                Quantite = demande,
             });
         }
 
@@ -184,6 +296,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
 
         db.Commandes.Add(commande);
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
         return commande;
     }
 

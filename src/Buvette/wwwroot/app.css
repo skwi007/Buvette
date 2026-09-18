@@ -86,6 +86,35 @@ h1:focus {
     color: #45505c;
 }
 
+/* Stock restant : lisible d'un coup d'œil sans encombrer le bouton. */
+.produit-stock {
+    font-size: 0.85rem;
+    color: #5a6673;
+}
+
+.produit-stock.bas {
+    color: #9a5b00;
+    font-weight: 600;
+}
+
+.produit-stock.vide {
+    color: #b02a37;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.produit-bouton.epuise {
+    background: #f6f7f9;
+    border-style: dashed;
+    border-color: #c9ced4;
+}
+
+.produit-bouton.epuise .produit-nom,
+.produit-bouton.epuise .produit-prix {
+    color: #8b949e;
+}
+
 .produit-badge {
     position: absolute;
     top: -0.55rem;

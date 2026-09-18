@@ -38,6 +38,15 @@ public class Produit
     [Range(0, 10000, ErrorMessage = "Le prix doit être compris entre 0 et 10 000 €.")]
     public decimal Prix { get; set; }
 
+    /// <summary>
+    /// Quantité prévue pour la journée, ou <c>null</c> quand le produit n'est pas compté
+    /// (bouteilles d'eau réapprovisionnées au fil de l'eau, par exemple).
+    /// Le restant n'est pas stocké : il se déduit des ventes, si bien qu'annuler une
+    /// commande erronée remet automatiquement les articles à disposition.
+    /// </summary>
+    [Range(0, 100000, ErrorMessage = "Le stock doit être un nombre positif.")]
+    public int? StockInitial { get; set; }
+
     /// <summary>Position du bouton sur l'écran de caisse.</summary>
     public int Ordre { get; set; }
 

@@ -33,9 +33,11 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
+    // Migrations plutôt que EnsureCreated : une évolution du modèle doit pouvoir s'appliquer
+    // à une base contenant déjà les ventes d'un événement, sans la recréer.
     var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BuvetteContext>>();
     await using var db = await factory.CreateDbContextAsync();
-    await db.Database.EnsureCreatedAsync();
+    await db.Database.MigrateAsync();
 }
 
 if (!app.Environment.IsDevelopment())

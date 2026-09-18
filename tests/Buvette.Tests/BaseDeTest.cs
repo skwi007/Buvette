@@ -26,8 +26,10 @@ public sealed class BaseDeTest : IDisposable
         var options = new DbContextOptionsBuilder<BuvetteContext>().UseSqlite(_connexion).Options;
         Fabrique = new Fabricant(options);
 
+        // Les migrations, et non EnsureCreated : les tests valident ainsi que le script de
+        // migration produit bien le schéma attendu par le modèle, comme en production.
         using (var db = Fabrique.CreateDbContext())
-            db.Database.EnsureCreated();
+            db.Database.Migrate();
 
         Service = new BuvetteService(Fabrique);
     }
@@ -60,6 +62,18 @@ public sealed class BaseDeTest : IDisposable
         var produits = await Service.ProduitsActifsAsync(evenementId);
         return new CarteDeTest(evenementId, produits.ToDictionary(p => p.Nom, p => p.Id));
     }
+
+    /// <summary>Fixe la quantité prévue d'un produit ; <c>null</c> le rend illimité.</summary>
+    public async Task DefinirStockAsync(CarteDeTest carte, string nom, int? stock)
+    {
+        var produit = (await Service.ProduitsActifsAsync(carte.EvenementId)).Single(p => p.Nom == nom);
+        produit.StockInitial = stock;
+        await Service.EnregistrerProduitAsync(produit);
+    }
+
+    /// <summary>Le stock restant d'un produit, tel que l'écran de caisse l'affiche.</summary>
+    public async Task<int?> RestantAsync(CarteDeTest carte, string nom) =>
+        (await Service.ProduitsEnVenteAsync(carte.EvenementId)).Single(p => p.Nom == nom).StockRestant;
 
     public void Dispose() => _connexion.Dispose();
 

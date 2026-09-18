@@ -1,5 +1,6 @@
 @page "/caisse/{Id:int}"
 @inject BuvetteService Service
+@inject ILogger<Caisse> Journal
 
 <PageTitle>@(evenement?.Nom ?? "Caisse") — caisse</PageTitle>
 
@@ -58,14 +59,21 @@ else
                 @foreach (var p in produits)
                 {
                     var quantite = Quantite(p.Id);
-                    <button type="button" class="produit-bouton @(quantite > 0 ? "actif" : "")"
-                            disabled="@evenement.Cloture" @onclick="() => Ajouter(p.Id)">
+                    var disponible = Disponible(p);
+                    <button type="button" class="produit-bouton @(quantite > 0 ? "actif" : "") @(disponible == 0 ? "epuise" : "")"
+                            disabled="@(evenement.Cloture || disponible == 0)" @onclick="() => Ajouter(p.Id)">
                         @if (quantite > 0)
                         {
                             <span class="produit-badge">@quantite</span>
                         }
                         <span class="produit-nom">@p.Nom</span>
                         <span class="produit-prix">@p.Prix.ToString("C2")</span>
+                        @if (p.StockSuivi)
+                        {
+                            <span class="produit-stock @(disponible == 0 ? "vide" : disponible <= 5 ? "bas" : "")">
+                                @(disponible == 0 ? "Épuisé" : $"Plus que {disponible}")
+                            </span>
+                        }
                     </button>
                 }
             </div>
@@ -156,7 +164,7 @@ else
     [Parameter] public int Id { get; set; }
 
     private Evenement? evenement;
-    private List<Produit> produits = [];
+    private List<ProduitEnVente> produits = [];
     private bool introuvable;
 
     private readonly Dictionary<int, int> panier = [];
@@ -166,7 +174,7 @@ else
     private string? erreur;
     private bool encaissementEnCours;
 
-    private List<(Produit Produit, int Quantite)> Lignes =>
+    private List<(ProduitEnVente Produit, int Quantite)> Lignes =>
         produits.Where(p => Quantite(p.Id) > 0)
                 .Select(p => (p, Quantite(p.Id)))
                 .ToList();
@@ -177,13 +185,29 @@ else
     {
         evenement = await Service.ChargerEvenementAsync(Id);
         introuvable = evenement is null;
-        produits = evenement is null ? [] : await Service.ProduitsActifsAsync(Id);
+        produits = evenement is null ? [] : await Service.ProduitsEnVenteAsync(Id);
     }
 
     private int Quantite(int produitId) => panier.GetValueOrDefault(produitId);
 
+    /// <summary>Ce qu'il reste à prendre, une fois déduit ce qui est déjà dans le panier.</summary>
+    private int? Disponible(ProduitEnVente produit) =>
+        produit.StockRestant is int restant ? Math.Max(0, restant - Quantite(produit.Id)) : null;
+
     private void Ajouter(int produitId)
     {
+        var produit = produits.FirstOrDefault(p => p.Id == produitId);
+        if (produit is null) return;
+
+        if (Disponible(produit) is 0)
+        {
+            erreur = produit.StockRestant == 0
+                ? $"« {produit.Nom} » est épuisé."
+                : $"Il ne reste que {produit.StockRestant} « {produit.Nom} », déjà tous dans la commande.";
+            return;
+        }
+
+        erreur = null;
         panier[produitId] = Quantite(produitId) + 1;
         message = null;
     }
@@ -218,12 +242,24 @@ else
                 : $"Commande n° {commande.Id} encaissée : {commande.Total:C2}.";
 
             Vider();
+            // Le stock restant vient de changer : les boutons doivent le refléter aussitôt.
+            produits = await Service.ProduitsEnVenteAsync(Id);
         }
         catch (InvalidOperationException ex)
         {
-            // Produit supprimé ou buvette clôturée depuis un autre écran : on resynchronise.
+            // Stock épuisé par une autre caisse, produit supprimé ou buvette clôturée
+            // depuis un autre écran : on affiche la raison et on resynchronise.
             erreur = ex.Message;
             await OnParametersSetAsync();
+        }
+        catch (Exception ex)
+        {
+            // Incident technique (base occupée, disque plein…). Le bénévole n'a que faire
+            // du message d'origine : il lui faut savoir que rien n'a été encaissé, et que
+            // la commande est toujours à l'écran pour être revalidée.
+            Journal.LogError(ex, "Échec technique de l'encaissement sur l'événement {Evenement}", Id);
+            erreur = "L'encaissement n'a pas abouti et rien n'a été enregistré. "
+                   + "La commande est intacte : appuyez de nouveau sur « Encaisser ».";
         }
         finally
         {
