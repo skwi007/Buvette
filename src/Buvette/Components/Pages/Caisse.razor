@@ -1,0 +1,233 @@
+@page "/caisse/{Id:int}"
+@inject BuvetteService Service
+
+<PageTitle>@(evenement?.Nom ?? "Caisse") — caisse</PageTitle>
+
+@if (introuvable)
+{
+    <h1>Événement introuvable</h1>
+    <a class="btn btn-primary" href="/">Retour à la liste</a>
+}
+else if (evenement is null)
+{
+    <p class="text-secondary">Chargement…</p>
+}
+else
+{
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h1 class="h3 mb-0">@evenement.Nom</h1>
+            <p class="text-secondary mb-0">@evenement.Date.ToString("dddd d MMMM yyyy")</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-secondary" href="/historique/@Id">Historique</a>
+            <a class="btn btn-outline-secondary" href="/evenement/@Id">Produits</a>
+        </div>
+    </div>
+
+    @if (evenement.Cloture)
+    {
+        <div class="alert alert-warning">
+            Cette buvette est clôturée. Pour encaisser à nouveau, rouvrez-la depuis la page
+            <a href="/evenement/@Id">Produits</a>.
+        </div>
+    }
+
+    @if (produits.Count == 0)
+    {
+        <div class="alert alert-info">
+            Aucun produit en vente. <a href="/evenement/@Id">Ajoutez-en d'abord</a>.
+        </div>
+    }
+
+    @if (message is not null)
+    {
+        <div class="alert alert-success d-flex justify-content-between align-items-center" role="status">
+            <span>@message</span>
+            <button class="btn-close" aria-label="Fermer" @onclick="() => message = null"></button>
+        </div>
+    }
+    @if (erreur is not null)
+    {
+        <div class="alert alert-danger" role="alert">@erreur</div>
+    }
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="produits-grille">
+                @foreach (var p in produits)
+                {
+                    var quantite = Quantite(p.Id);
+                    <button type="button" class="produit-bouton @(quantite > 0 ? "actif" : "")"
+                            disabled="@evenement.Cloture" @onclick="() => Ajouter(p.Id)">
+                        @if (quantite > 0)
+                        {
+                            <span class="produit-badge">@quantite</span>
+                        }
+                        <span class="produit-nom">@p.Nom</span>
+                        <span class="produit-prix">@p.Prix.ToString("C2")</span>
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card panier">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Commande en cours</span>
+                    @if (Lignes.Count > 0)
+                    {
+                        <button class="btn btn-sm btn-outline-danger" @onclick="Vider">Tout effacer</button>
+                    }
+                </div>
+
+                @if (Lignes.Count == 0)
+                {
+                    <div class="card-body text-secondary">
+                        Touchez un produit pour commencer la commande.
+                    </div>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var (produit, quantite) in Lignes)
+                        {
+                            <li class="list-group-item" @key="produit.Id">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <div class="flex-grow-1">
+                                        <div class="fw-semibold">@produit.Nom</div>
+                                        <div class="text-secondary small">
+                                            @quantite × @produit.Prix.ToString("C2")
+                                        </div>
+                                    </div>
+                                    <div class="btn-group" role="group" aria-label="Quantité de @produit.Nom">
+                                        <button class="btn btn-outline-secondary" @onclick="() => Retirer(produit.Id)"
+                                                aria-label="Retirer un @produit.Nom">−</button>
+                                        <span class="btn btn-light disabled quantite">@quantite</span>
+                                        <button class="btn btn-outline-secondary" @onclick="() => Ajouter(produit.Id)"
+                                                aria-label="Ajouter un @produit.Nom">+</button>
+                                    </div>
+                                    <div class="text-end sous-total">@((produit.Prix * quantite).ToString("C2"))</div>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-baseline mb-3">
+                        <span class="fs-5">Total à payer</span>
+                        <span class="total">@Total.ToString("C2")</span>
+                    </div>
+
+                    <label class="form-label" for="recu">Montant reçu (facultatif)</label>
+                    <input id="recu" class="form-control form-control-lg mb-2" type="number" step="0.01" min="0"
+                           inputmode="decimal" value="@(recu?.ToString("0.##") ?? "")"
+                           @onchange="e => recu = Prix.Analyser(e.Value?.ToString())" />
+
+                    @if (recu is decimal montant && Total > 0)
+                    {
+                        @if (montant >= Total)
+                        {
+                            <div class="alert alert-info py-2 mb-3">
+                                À rendre : <strong class="fs-4">@((montant - Total).ToString("C2"))</strong>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="alert alert-warning py-2 mb-3">
+                                Il manque @((Total - montant).ToString("C2")).
+                            </div>
+                        }
+                    }
+
+                    <button class="btn btn-success btn-lg w-100"
+                            disabled="@(Lignes.Count == 0 || evenement.Cloture || encaissementEnCours)"
+                            @onclick="EncaisserAsync">
+                        @(encaissementEnCours ? "Encaissement…" : "Encaisser")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Evenement? evenement;
+    private List<Produit> produits = [];
+    private bool introuvable;
+
+    private readonly Dictionary<int, int> panier = [];
+    private decimal? recu;
+
+    private string? message;
+    private string? erreur;
+    private bool encaissementEnCours;
+
+    private List<(Produit Produit, int Quantite)> Lignes =>
+        produits.Where(p => Quantite(p.Id) > 0)
+                .Select(p => (p, Quantite(p.Id)))
+                .ToList();
+
+    private decimal Total => Lignes.Sum(l => l.Produit.Prix * l.Quantite);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        evenement = await Service.ChargerEvenementAsync(Id);
+        introuvable = evenement is null;
+        produits = evenement is null ? [] : await Service.ProduitsActifsAsync(Id);
+    }
+
+    private int Quantite(int produitId) => panier.GetValueOrDefault(produitId);
+
+    private void Ajouter(int produitId)
+    {
+        panier[produitId] = Quantite(produitId) + 1;
+        message = null;
+    }
+
+    private void Retirer(int produitId)
+    {
+        var restant = Quantite(produitId) - 1;
+        if (restant > 0) panier[produitId] = restant;
+        else panier.Remove(produitId);
+    }
+
+    private void Vider()
+    {
+        panier.Clear();
+        recu = null;
+        erreur = null;
+    }
+
+    private async Task EncaisserAsync()
+    {
+        encaissementEnCours = true;
+        erreur = null;
+        try
+        {
+            var total = Total;
+            var rendu = recu is decimal m && m >= total ? m - total : (decimal?)null;
+
+            var commande = await Service.EncaisserAsync(Id, panier);
+
+            message = rendu is decimal r && r > 0
+                ? $"Commande n° {commande.Id} encaissée : {commande.Total:C2}. À rendre : {r:C2}."
+                : $"Commande n° {commande.Id} encaissée : {commande.Total:C2}.";
+
+            Vider();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Produit supprimé ou buvette clôturée depuis un autre écran : on resynchronise.
+            erreur = ex.Message;
+            await OnParametersSetAsync();
+        }
+        finally
+        {
+            encaissementEnCours = false;
+        }
+    }
+}

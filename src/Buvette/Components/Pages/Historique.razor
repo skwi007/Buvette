@@ -1,0 +1,207 @@
+@page "/historique/{Id:int}"
+@inject BuvetteService Service
+
+<PageTitle>@(recap?.Evenement.Nom ?? "Historique") — historique</PageTitle>
+
+@if (introuvable)
+{
+    <h1>Événement introuvable</h1>
+    <a class="btn btn-primary" href="/">Retour à la liste</a>
+}
+else if (recap is null)
+{
+    <p class="text-secondary">Chargement…</p>
+}
+else
+{
+    <nav aria-label="fil d'Ariane" class="mb-2">
+        <a href="/" class="text-decoration-none">← Tous les événements</a>
+    </nav>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+        <div>
+            <h1 class="mb-0">@recap.Evenement.Nom</h1>
+            <p class="text-secondary mb-0">@recap.Evenement.Date.ToString("dddd d MMMM yyyy")</p>
+        </div>
+        <div class="d-flex gap-2">
+            @if (!recap.Evenement.Cloture)
+            {
+                <a class="btn btn-primary" href="/caisse/@Id">Caisse</a>
+            }
+            <a class="btn btn-outline-secondary" href="/export/@Id">Export Excel (CSV)</a>
+            <button class="btn btn-outline-secondary" @onclick="ImprimerAsync">Imprimer</button>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg-3">
+            <div class="card chiffre h-100">
+                <div class="card-body">
+                    <div class="chiffre-libelle">Total des ventes</div>
+                    <div class="chiffre-valeur">@recap.TotalVentes.ToString("C2")</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card chiffre h-100 border-success">
+                <div class="card-body">
+                    <div class="chiffre-libelle">Attendu en caisse</div>
+                    <div class="chiffre-valeur text-success">@recap.TotalEnCaisse.ToString("C2")</div>
+                    <div class="text-secondary small">dont @recap.Evenement.FondDeCaisse.ToString("C2") de fond de caisse</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card chiffre h-100">
+                <div class="card-body">
+                    <div class="chiffre-libelle">Commandes</div>
+                    <div class="chiffre-valeur">@recap.NombreCommandes</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card chiffre h-100">
+                <div class="card-body">
+                    <div class="chiffre-libelle">Panier moyen</div>
+                    <div class="chiffre-valeur">@recap.PanierMoyen.ToString("C2")</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h2 class="h4 mb-3">Ce qui a été vendu</h2>
+
+    @if (recap.Produits.Count == 0)
+    {
+        <p class="text-secondary">Aucune vente enregistrée pour l'instant.</p>
+    }
+    else
+    {
+        <div class="table-responsive mb-4">
+            <table class="table table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th scope="col">Produit</th>
+                        <th scope="col" class="text-end">Prix unitaire</th>
+                        <th scope="col" class="text-end">Quantité vendue</th>
+                        <th scope="col" class="text-end">Montant</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var ligne in recap.Produits)
+                    {
+                        <tr>
+                            <td>@ligne.Nom</td>
+                            <td class="text-end">@ligne.PrixUnitaire.ToString("C2")</td>
+                            <td class="text-end fw-semibold">@ligne.Quantite</td>
+                            <td class="text-end">@ligne.Montant.ToString("C2")</td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot class="table-group-divider">
+                    <tr class="fw-bold fs-5">
+                        <td colspan="3">Total des ventes</td>
+                        <td class="text-end">@recap.TotalVentes.ToString("C2")</td>
+                    </tr>
+                    <tr>
+                        <td colspan="3">Fond de caisse</td>
+                        <td class="text-end">@recap.Evenement.FondDeCaisse.ToString("C2")</td>
+                    </tr>
+                    <tr class="fw-bold fs-5 table-success">
+                        <td colspan="3">Montant attendu dans la caisse</td>
+                        <td class="text-end">@recap.TotalEnCaisse.ToString("C2")</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    }
+
+    <h2 class="h4 mb-3">
+        Détail des commandes
+        <button class="btn btn-sm btn-outline-secondary align-middle ms-2" @onclick="() => detailOuvert = !detailOuvert">
+            @(detailOuvert ? "Masquer" : "Afficher")
+        </button>
+    </h2>
+
+    @if (detailOuvert)
+    {
+        @if (commandes.Count == 0)
+        {
+            <p class="text-secondary">Aucune commande.</p>
+        }
+        else
+        {
+            <p class="text-secondary small">
+                Annuler une commande la retire définitivement des totaux&nbsp;: à n'utiliser qu'en cas d'erreur de saisie.
+            </p>
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th scope="col" style="width:5rem">N°</th>
+                            <th scope="col" style="width:7rem">Heure</th>
+                            <th scope="col">Contenu</th>
+                            <th scope="col" class="text-end" style="width:8rem">Total</th>
+                            <th scope="col" style="width:11rem"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in commandes)
+                        {
+                            <tr @key="c.Id">
+                                <td>@c.Id</td>
+                                <td>@c.DateHeure.ToString("HH:mm")</td>
+                                <td>@string.Join(", ", c.Lignes.Select(l => $"{l.Quantite} × {l.NomProduit}"))</td>
+                                <td class="text-end">@c.Total.ToString("C2")</td>
+                                <td class="text-end">
+                                    @if (annulationId == c.Id)
+                                    {
+                                        <span class="me-2 small">Annuler&nbsp;?</span>
+                                        <button class="btn btn-sm btn-danger" @onclick="() => AnnulerAsync(c.Id)">Oui</button>
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => annulationId = null">Non</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => annulationId = c.Id">
+                                            Annuler
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private Recapitulatif? recap;
+    private List<Commande> commandes = [];
+    private bool introuvable;
+    private bool detailOuvert;
+    private int? annulationId;
+
+    protected override async Task OnParametersSetAsync() => await ChargerAsync();
+
+    private async Task ChargerAsync()
+    {
+        recap = await Service.RecapitulatifAsync(Id);
+        introuvable = recap is null;
+        commandes = recap is null ? [] : await Service.ListerCommandesAsync(Id);
+    }
+
+    private async Task AnnulerAsync(int commandeId)
+    {
+        annulationId = null;
+        await Service.AnnulerCommandeAsync(commandeId);
+        await ChargerAsync();
+    }
+
+    private async Task ImprimerAsync() => await JS.InvokeVoidAsync("window.print");
+}

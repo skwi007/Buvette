@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Buvette/Buvette.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Buvette.Tests/Buvette.Tests.csproj" />
+  </Folder>
+</Solution>

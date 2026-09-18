@@ -1,0 +1,61 @@
+.barre-haut {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 1.25rem;
+    background: linear-gradient(90deg, #1b3a6b, #2b6cb0);
+    color: #fff;
+}
+
+.marque {
+    color: #fff;
+    font-size: 1.15rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.marque:hover {
+    color: #fff;
+    text-decoration: underline;
+}
+
+.contenu {
+    display: block;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 1.5rem 1.25rem 4rem;
+}
+
+/* Bandeau de perte de connexion : masqué tant que Blazor ne le déclenche pas. */
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.7rem 1.25rem;
+    background: lightyellow;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    color-scheme: light only;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.9rem;
+    cursor: pointer;
+}
+
+/* À l'impression du récapitulatif, l'en-tête et les boutons n'apportent rien sur le papier. */
+@media print {
+    .barre-haut {
+        display: none;
+    }
+
+    .contenu {
+        padding: 0;
+        max-width: none;
+    }
+}

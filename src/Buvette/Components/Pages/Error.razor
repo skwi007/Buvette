@@ -1,0 +1,30 @@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Erreur</PageTitle>
+
+<h1 class="text-danger">Une erreur est survenue</h1>
+<p>
+    L'opération n'a pas pu être menée à son terme. Revenez à l'écran précédent et réessayez ;
+    les ventes déjà encaissées sont conservées.
+</p>
+
+@if (ShowRequestId)
+{
+    <p class="text-secondary">
+        <strong>Référence technique :</strong> <code>@RequestId</code>
+    </p>
+}
+
+<a class="btn btn-primary" href="/">Retour aux événements</a>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

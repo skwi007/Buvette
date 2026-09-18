@@ -1,0 +1,303 @@
+@page "/evenement/{Id:int}"
+@inject BuvetteService Service
+@inject NavigationManager Nav
+
+<PageTitle>@(evenement?.Nom ?? "Événement") — produits</PageTitle>
+
+@if (introuvable)
+{
+    <h1>Événement introuvable</h1>
+    <p class="text-secondary">Il a peut-être été supprimé.</p>
+    <a class="btn btn-primary" href="/">Retour à la liste</a>
+}
+else if (evenement is null)
+{
+    <p class="text-secondary">Chargement…</p>
+}
+else
+{
+    <nav aria-label="fil d'Ariane" class="mb-2">
+        <a href="/" class="text-decoration-none">← Tous les événements</a>
+    </nav>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+        <div>
+            <h1 class="mb-0">@evenement.Nom</h1>
+            <p class="text-secondary mb-0">@evenement.Date.ToString("dddd d MMMM yyyy")</p>
+        </div>
+        <div class="d-flex gap-2">
+            @if (!evenement.Cloture)
+            {
+                <a class="btn btn-primary btn-lg" href="/caisse/@Id">Ouvrir la caisse</a>
+            }
+            <a class="btn btn-outline-secondary btn-lg" href="/historique/@Id">Historique</a>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h5 mb-3">Réglages de l'événement</h2>
+            <EditForm Model="evenement" OnValidSubmit="EnregistrerEvenementAsync" FormName="reglages">
+                <DataAnnotationsValidator />
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-5">
+                        <label class="form-label" for="ev-nom">Nom</label>
+                        <InputText id="ev-nom" class="form-control" @bind-Value="evenement.Nom" />
+                        <ValidationMessage For="() => evenement.Nom" class="text-danger small" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label" for="ev-date">Date</label>
+                        <InputDate id="ev-date" class="form-control" @bind-Value="evenement.Date" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label" for="ev-fond">Fond de caisse (€)</label>
+                        <InputNumber id="ev-fond" class="form-control" @bind-Value="evenement.FondDeCaisse" step="0.01" />
+                        <ValidationMessage For="() => evenement.FondDeCaisse" class="text-danger small" />
+                    </div>
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-success w-100">Enregistrer</button>
+                    </div>
+                </div>
+            </EditForm>
+            @if (reglagesEnregistres)
+            {
+                <p class="text-success mt-2 mb-0">Réglages enregistrés.</p>
+            }
+        </div>
+    </div>
+
+    <h2 class="h4 mb-3">Produits de la buvette</h2>
+
+    @if (erreur is not null)
+    {
+        <div class="alert alert-danger">@erreur</div>
+    }
+
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th scope="col" style="width:6rem">Ordre</th>
+                    <th scope="col">Nom</th>
+                    <th scope="col" style="width:10rem">Prix (€)</th>
+                    <th scope="col" style="width:8rem">En vente</th>
+                    <th scope="col" style="width:12rem"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in produits)
+                {
+                    <tr @key="p.Id">
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Réordonner @p.Nom">
+                                <button class="btn btn-outline-secondary" title="Monter"
+                                        disabled="@(p == produits[0])" @onclick="() => DeplacerAsync(p.Id, -1)">↑</button>
+                                <button class="btn btn-outline-secondary" title="Descendre"
+                                        disabled="@(p == produits[^1])" @onclick="() => DeplacerAsync(p.Id, 1)">↓</button>
+                            </div>
+                        </td>
+                        <td>
+                            <input class="form-control" value="@p.Nom" aria-label="Nom du produit"
+                                   @onchange="e => ModifierNom(p, e.Value?.ToString())" />
+                        </td>
+                        <td>
+                            <input class="form-control" type="number" step="0.01" min="0" inputmode="decimal"
+                                   value="@p.Prix.ToString("0.##")" aria-label="Prix de @p.Nom"
+                                   @onchange="e => ModifierPrix(p, e.Value?.ToString())" />
+                        </td>
+                        <td>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" checked="@p.Actif"
+                                       aria-label="@p.Nom en vente"
+                                       @onchange="e => BasculerActifAsync(p, (bool)e.Value!)" />
+                            </div>
+                        </td>
+                        <td class="text-end">
+                            @if (suppressionId == p.Id)
+                            {
+                                <span class="me-2 small">Supprimer&nbsp;?</span>
+                                <button class="btn btn-sm btn-danger" @onclick="() => SupprimerProduitAsync(p.Id)">Oui</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => suppressionId = null">Non</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => suppressionId = p.Id">
+                                    Supprimer
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+                <tr>
+                    <td></td>
+                    <td>
+                        <input class="form-control" placeholder="Tarte flambée nature" aria-label="Nom du nouveau produit"
+                               @bind="nouveauNom" @bind:event="oninput" @onkeydown="TouchePressee" />
+                    </td>
+                    <td>
+                        <input class="form-control" type="number" step="0.01" min="0" placeholder="8,00"
+                               inputmode="decimal" aria-label="Prix du nouveau produit"
+                               value="@(nouveauPrix?.ToString("0.##") ?? "")"
+                               @onchange="e => nouveauPrix = Prix.Analyser(e.Value?.ToString())"
+                               @onkeydown="TouchePressee" />
+                    </td>
+                    <td colspan="2">
+                        <button class="btn btn-success" disabled="@string.IsNullOrWhiteSpace(nouveauNom)"
+                                @onclick="AjouterProduitAsync">
+                            + Ajouter
+                        </button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="text-secondary small">
+        Les modifications de nom et de prix sont enregistrées dès que vous quittez la case.
+        Les ventes déjà encaissées gardent le prix pratiqué au moment de la vente.
+    </p>
+
+    <hr class="my-4" />
+
+    <h2 class="h5">Fin de journée</h2>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <button class="btn @(evenement.Cloture ? "btn-outline-primary" : "btn-outline-warning")"
+                @onclick="BasculerClotureAsync">
+            @(evenement.Cloture ? "Rouvrir la buvette" : "Clôturer la buvette")
+        </button>
+        @if (suppressionEvenement)
+        {
+            <span class="ms-2">Supprimer l'événement et toutes ses ventes&nbsp;?</span>
+            <button class="btn btn-danger" @onclick="SupprimerEvenementAsync">Oui, supprimer</button>
+            <button class="btn btn-outline-secondary" @onclick="() => suppressionEvenement = false">Annuler</button>
+        }
+        else
+        {
+            <button class="btn btn-outline-danger" @onclick="() => suppressionEvenement = true">
+                Supprimer l'événement
+            </button>
+        }
+    </div>
+    <p class="text-secondary small mt-2">
+        Clôturer empêche toute nouvelle vente, sans rien effacer&nbsp;: l'historique reste consultable.
+    </p>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Evenement? evenement;
+    private List<Produit> produits = [];
+    private bool introuvable;
+    private bool reglagesEnregistres;
+    private string? erreur;
+
+    private string nouveauNom = "";
+    private decimal? nouveauPrix;
+
+    private int? suppressionId;
+    private bool suppressionEvenement;
+
+    protected override async Task OnParametersSetAsync() => await ChargerAsync();
+
+    private async Task ChargerAsync()
+    {
+        evenement = await Service.ChargerEvenementAsync(Id);
+        introuvable = evenement is null;
+        produits = evenement?.Produits.OrderBy(p => p.Ordre).ThenBy(p => p.Id).ToList() ?? [];
+    }
+
+    private async Task EnregistrerEvenementAsync()
+    {
+        await Service.EnregistrerEvenementAsync(evenement!);
+        reglagesEnregistres = true;
+    }
+
+    private async Task ModifierNom(Produit p, string? valeur)
+    {
+        var nom = valeur?.Trim();
+        if (string.IsNullOrEmpty(nom))
+        {
+            erreur = "Le nom d'un produit ne peut pas être vide.";
+            await ChargerAsync();
+            return;
+        }
+        erreur = null;
+        p.Nom = nom;
+        await Service.EnregistrerProduitAsync(p);
+    }
+
+    private async Task ModifierPrix(Produit p, string? valeur)
+    {
+        if (Prix.Analyser(valeur) is not decimal prix || prix < 0)
+        {
+            erreur = "Le prix doit être un nombre positif.";
+            await ChargerAsync();
+            return;
+        }
+        erreur = null;
+        p.Prix = prix;
+        await Service.EnregistrerProduitAsync(p);
+    }
+
+    private async Task BasculerActifAsync(Produit p, bool actif)
+    {
+        p.Actif = actif;
+        await Service.EnregistrerProduitAsync(p);
+    }
+
+    private async Task TouchePressee(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await AjouterProduitAsync();
+    }
+
+    private async Task AjouterProduitAsync()
+    {
+        var nom = nouveauNom.Trim();
+        if (string.IsNullOrEmpty(nom)) return;
+
+        var prix = nouveauPrix ?? 0m;
+        if (prix < 0)
+        {
+            erreur = "Le prix doit être un nombre positif.";
+            return;
+        }
+
+        erreur = null;
+        await Service.AjouterProduitAsync(new Produit
+        {
+            EvenementId = Id,
+            Nom = nom,
+            Prix = prix,
+        });
+
+        nouveauNom = "";
+        nouveauPrix = null;
+        await ChargerAsync();
+    }
+
+    private async Task DeplacerAsync(int produitId, int sens)
+    {
+        await Service.DeplacerProduitAsync(produitId, sens);
+        await ChargerAsync();
+    }
+
+    private async Task SupprimerProduitAsync(int produitId)
+    {
+        suppressionId = null;
+        await Service.SupprimerProduitAsync(produitId);
+        await ChargerAsync();
+    }
+
+    private async Task BasculerClotureAsync()
+    {
+        evenement!.Cloture = !evenement.Cloture;
+        await Service.EnregistrerEvenementAsync(evenement);
+    }
+
+    private async Task SupprimerEvenementAsync()
+    {
+        await Service.SupprimerEvenementAsync(Id);
+        Nav.NavigateTo("/");
+    }
+}

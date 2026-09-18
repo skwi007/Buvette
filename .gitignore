@@ -1,0 +1,24 @@
+# Sorties de compilation .NET
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+publie/
+publish/
+*.user
+
+# Base de données de la buvette : contient les ventes réelles de l'association,
+# elle n'a rien à faire dans le dépôt. La sauvegarder en copiant le fichier.
+*.db
+*.db-shm
+*.db-wal
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+*.suo
+*.userprefs
+
+# Divers
+[Tt]est[Rr]esult*/
+*.log
