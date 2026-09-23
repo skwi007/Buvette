@@ -18,6 +18,9 @@ public sealed class BaseDeTest : IDisposable
     public IDbContextFactory<BuvetteContext> Fabrique { get; }
     public BuvetteService Service { get; }
 
+    /// <summary>Les signaux émis par le service, pour vérifier que les autres écrans seraient prévenus.</summary>
+    public NotificationsBuvette Notifications { get; } = new();
+
     public BaseDeTest()
     {
         _connexion = new SqliteConnection("Data Source=:memory:");
@@ -31,7 +34,7 @@ public sealed class BaseDeTest : IDisposable
         using (var db = Fabrique.CreateDbContext())
             db.Database.Migrate();
 
-        Service = new BuvetteService(Fabrique);
+        Service = new BuvetteService(Fabrique, Notifications);
     }
 
     /// <summary>Accès direct à la base, pour vérifier ce que le service a réellement écrit.</summary>

@@ -74,7 +74,11 @@ public class StockInsuffisantException(string produit, int restant)
     public int Restant { get; } = restant;
 }
 
-public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
+/// <remarks>
+/// Toute modification d'un événement est signalée à <see cref="NotificationsBuvette"/>
+/// une fois enregistrée, pour que les autres caisses se mettent à jour d'elles-mêmes.
+/// </remarks>
+public class BuvetteService(IDbContextFactory<BuvetteContext> factory, NotificationsBuvette notifications)
 {
     public async Task<List<Evenement>> ListerEvenementsAsync()
     {
@@ -189,6 +193,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
                 .SetProperty(e => e.Date, evenement.Date)
                 .SetProperty(e => e.FondDeCaisse, evenement.FondDeCaisse)
                 .SetProperty(e => e.Cloture, evenement.Cloture));
+        notifications.Signaler(evenement.Id);
         // MontantCompte est volontairement absent : il n'appartient pas au formulaire de
         // réglages, et l'inclure permettrait à un écran resté ouvert d'écraser un comptage
         // saisi entre-temps depuis la page Historique.
@@ -204,12 +209,14 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
         await db.Evenements
             .Where(e => e.Id == evenementId)
             .ExecuteUpdateAsync(s => s.SetProperty(e => e.MontantCompte, montantCompte));
+        notifications.Signaler(evenementId);
     }
 
     public async Task SupprimerEvenementAsync(int id)
     {
         await using var db = await factory.CreateDbContextAsync();
         await db.Evenements.Where(e => e.Id == id).ExecuteDeleteAsync();
+        notifications.Signaler(id);
     }
 
     public async Task AjouterProduitAsync(Produit produit)
@@ -221,6 +228,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
         produit.Ordre = dernier + 1;
         db.Produits.Add(produit);
         await db.SaveChangesAsync();
+        notifications.Signaler(produit.EvenementId);
     }
 
     public async Task EnregistrerProduitAsync(Produit produit)
@@ -233,12 +241,19 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
                 .SetProperty(p => p.Prix, produit.Prix)
                 .SetProperty(p => p.Actif, produit.Actif)
                 .SetProperty(p => p.StockInitial, produit.StockInitial));
+        notifications.Signaler(produit.EvenementId);
     }
 
     public async Task SupprimerProduitAsync(int produitId)
     {
         await using var db = await factory.CreateDbContextAsync();
+        var evenementId = await db.Produits
+            .Where(p => p.Id == produitId)
+            .Select(p => (int?)p.EvenementId)
+            .FirstOrDefaultAsync();
+
         await db.Produits.Where(p => p.Id == produitId).ExecuteDeleteAsync();
+        if (evenementId is int id) notifications.Signaler(id);
     }
 
     /// <summary>Échange la position de deux produits pour réordonner les boutons de la caisse.</summary>
@@ -261,6 +276,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
         for (var i = 0; i < fratrie.Count; i++) fratrie[i].Ordre = i + 1;
 
         await db.SaveChangesAsync();
+        notifications.Signaler(produit.EvenementId);
     }
 
     /// <summary>
@@ -283,7 +299,9 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
         {
             try
             {
-                return await EncaisserUneFoisAsync(evenementId, quantites, offerte);
+                var commande = await EncaisserUneFoisAsync(evenementId, quantites, offerte);
+                notifications.Signaler(evenementId);
+                return commande;
             }
             catch (SqliteException ex) when (EstConflitDEcriture(ex) && tentative < tentativesMax)
             {
@@ -360,7 +378,13 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory)
     public async Task AnnulerCommandeAsync(int commandeId)
     {
         await using var db = await factory.CreateDbContextAsync();
+        var evenementId = await db.Commandes
+            .Where(c => c.Id == commandeId)
+            .Select(c => (int?)c.EvenementId)
+            .FirstOrDefaultAsync();
+
         await db.Commandes.Where(c => c.Id == commandeId).ExecuteDeleteAsync();
+        if (evenementId is int id) notifications.Signaler(id);
     }
 
     /// <summary>

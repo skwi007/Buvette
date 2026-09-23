@@ -1,5 +1,8 @@
 @page "/historique/{Id:int}"
 @inject BuvetteService Service
+@inject NotificationsBuvette Notifications
+@inject ILogger<Historique> Journal
+@implements IDisposable
 
 <PageTitle>@(recap?.Evenement.Nom ?? "Historique") — historique</PageTitle>
 
@@ -316,7 +319,37 @@ else
     private decimal? montantCompte;
     private bool comptageEnregistre;
 
+    protected override void OnInitialized() => Notifications.EvenementModifie += SurEvenementModifie;
+
     protected override async Task OnParametersSetAsync() => await ChargerAsync();
+
+    /// <summary>Les ventes des caisses s'ajoutent au récapitulatif au fil de la journée.</summary>
+    private void SurEvenementModifie(int evenementId)
+    {
+        if (evenementId == Id) _ = InvokeAsync(RafraichirAsync);
+    }
+
+    private async Task RafraichirAsync()
+    {
+        try
+        {
+            // Un montant en cours de saisie dans le comptage ne doit pas être effacé par
+            // la vente qu'une caisse vient d'enregistrer : on ne le remplace que s'il n'a
+            // pas été modifié depuis le dernier chargement.
+            var saisie = montantCompte;
+            var saisieModifiee = saisie != recap?.Evenement.MontantCompte;
+
+            await ChargerAsync();
+            if (saisieModifiee) montantCompte = saisie;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Journal.LogWarning(ex, "Mise à jour en direct de l'historique impossible pour l'événement {Evenement}", Id);
+        }
+    }
+
+    public void Dispose() => Notifications.EvenementModifie -= SurEvenementModifie;
 
     private async Task ChargerAsync()
     {

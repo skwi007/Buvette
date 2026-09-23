@@ -27,6 +27,8 @@ var cheminBase = Path.Combine(builder.Environment.ContentRootPath, "buvette.db")
 builder.Services.AddDbContextFactory<BuvetteContext>(options =>
     options.UseSqlite($"Data Source={cheminBase}"));
 
+// Singleton : c'est lui qui relie entre eux les téléphones connectés en même temps.
+builder.Services.AddSingleton<NotificationsBuvette>();
 builder.Services.AddScoped<BuvetteService>();
 
 var app = builder.Build();

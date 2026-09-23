@@ -1,6 +1,8 @@
 @page "/caisse/{Id:int}"
 @inject BuvetteService Service
 @inject ILogger<Caisse> Journal
+@inject NotificationsBuvette Notifications
+@implements IDisposable
 
 <PageTitle>@(evenement?.Nom ?? "Caisse") — caisse</PageTitle>
 
@@ -200,12 +202,77 @@ else
 
     private decimal Total => Lignes.Sum(l => l.Produit.Prix * l.Quantite);
 
-    protected override async Task OnParametersSetAsync()
+    protected override void OnInitialized() => Notifications.EvenementModifie += SurEvenementModifie;
+
+    protected override async Task OnParametersSetAsync() => await ChargerAsync();
+
+    private async Task ChargerAsync()
     {
         evenement = await Service.ChargerEvenementAsync(Id);
         introuvable = evenement is null;
         produits = evenement is null ? [] : await Service.ProduitsEnVenteAsync(Id);
     }
+
+    /// <summary>
+    /// Une autre caisse (ou l'écran de réglages) vient de modifier l'événement : on relit
+    /// stocks, prix et clôture pour que les boutons disent la vérité sans recharger la page.
+    /// </summary>
+    private void SurEvenementModifie(int evenementId)
+    {
+        // Pendant notre propre encaissement, le signal vient de nous : la suite d'EncaisserAsync
+        // recharge déjà les produits, et vérifier le panier avant qu'il soit vidé signalerait
+        // à tort comme épuisés les articles que l'on vient justement de vendre.
+        if (evenementId != Id || encaissementEnCours) return;
+        _ = InvokeAsync(RafraichirAsync);
+    }
+
+    private async Task RafraichirAsync()
+    {
+        try
+        {
+            var avant = produits;
+            await ChargerAsync();
+            VerifierPanier(avant);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            // Sans conséquence : l'écran reste tel quel, et l'encaissement revérifie tout en base.
+            Journal.LogWarning(ex, "Mise à jour en direct de la caisse impossible pour l'événement {Evenement}", Id);
+        }
+    }
+
+    /// <summary>
+    /// Confronte la commande en cours au stock qui vient de changer. Un article retiré de la
+    /// vente disparaît du panier : il n'est plus affiché, et le laisser le ferait encaisser
+    /// sans que le total à l'écran l'annonce. Un article devenu insuffisant reste en place,
+    /// mais le bénévole est prévenu avant de valider plutôt qu'au moment d'encaisser.
+    /// </summary>
+    private void VerifierPanier(List<ProduitEnVente> avant)
+    {
+        var alertes = new List<string>();
+
+        foreach (var (id, quantite) in panier.ToList())
+        {
+            var produit = produits.FirstOrDefault(p => p.Id == id);
+            if (produit is null)
+            {
+                panier.Remove(id);
+                var nom = avant.FirstOrDefault(p => p.Id == id)?.Nom ?? "Un article";
+                alertes.Add($"« {nom} » n'est plus en vente : il a été retiré de la commande.");
+            }
+            else if (produit.StockRestant is int restant && quantite > restant)
+            {
+                alertes.Add(restant == 0
+                    ? $"« {produit.Nom} » vient d'être épuisé par une autre caisse."
+                    : $"Il ne reste plus que {restant} « {produit.Nom} », la commande en contient {quantite}.");
+            }
+        }
+
+        if (alertes.Count > 0) erreur = string.Join(" ", alertes);
+    }
+
+    public void Dispose() => Notifications.EvenementModifie -= SurEvenementModifie;
 
     private int Quantite(int produitId) => panier.GetValueOrDefault(produitId);
 
@@ -281,7 +348,7 @@ else
             // Stock épuisé par une autre caisse, produit supprimé ou buvette clôturée
             // depuis un autre écran : on affiche la raison et on resynchronise.
             erreur = ex.Message;
-            await OnParametersSetAsync();
+            await ChargerAsync();
         }
         catch (Exception ex)
         {

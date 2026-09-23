@@ -8,10 +8,22 @@
 }
 
 .marque {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
     color: #fff;
     font-size: 1.15rem;
     font-weight: 600;
     text-decoration: none;
+}
+
+/* Le logo a un fond blanc : on l'assume dans une pastille plutôt que de le poser sur le dégradé. */
+.logo {
+    height: 56px;
+    width: 56px;
+    border-radius: 8px;
+    background: #fff;
+    object-fit: contain;
 }
 
 .marque:hover {

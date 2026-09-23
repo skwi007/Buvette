@@ -47,7 +47,7 @@ public sealed class ConcurrenceTests : IDisposable
         using (var db = fabrique.CreateDbContext())
             db.Database.Migrate();
 
-        _service = new BuvetteService(fabrique);
+        _service = new BuvetteService(fabrique, new NotificationsBuvette());
     }
 
     [Theory]
