@@ -1,0 +1,6 @@
+# Caddy obtient et renouvelle seul le certificat HTTPS (Let's Encrypt) pour ce nom de domaine.
+# Il relaie aussi la connexion temps réel (WebSocket) de Blazor, sans réglage particulier.
+DOMAINE {
+	encode gzip
+	reverse_proxy 127.0.0.1:5000
+}

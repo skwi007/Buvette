@@ -191,3 +191,44 @@ h1:focus {
 .panier .total.offert {
     color: #5a6673;
 }
+
+/* ---- Pré-commandes HelloAsso ---- */
+
+/* Une grande case : on la coche du pouce, au comptoir, en tendant le sac au client. */
+.precommande-case {
+    width: 2rem;
+    height: 2rem;
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+    cursor: pointer;
+}
+
+.precommandes label {
+    cursor: pointer;
+}
+
+.precommandes .retiree {
+    background: #eef7f1;
+}
+
+.precommandes .retiree .fs-5 {
+    color: #5a6673;
+}
+
+.precommandes .annulee {
+    background: #f8f9fa;
+    color: #8a939c;
+}
+
+.precommandes .annulee .fs-5 {
+    text-decoration: line-through;
+}
+
+.precommande-articles {
+    margin-top: 0.35rem;
+}
+
+.precommande-articles .badge {
+    font-size: 0.95rem;
+    font-weight: 500;
+}

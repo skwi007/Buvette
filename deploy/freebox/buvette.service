@@ -1,0 +1,20 @@
+[Unit]
+Description=Buvette associative
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=buvette
+# La base buvette.db et les clés de connexion vivent dans ce dossier, à côté de l'exécutable.
+WorkingDirectory=/opt/buvette/app
+ExecStart=/opt/buvette/app/Buvette
+# Contient Buvette__MotDePasse, lisible par root seulement.
+EnvironmentFile=/etc/buvette.env
+Environment=ASPNETCORE_ENVIRONMENT=Production
+# Écoute uniquement en local : seul Caddy, qui ajoute le HTTPS, est joignable depuis Internet.
+Environment=Kestrel__Endpoints__Http__Url=http://127.0.0.1:5000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

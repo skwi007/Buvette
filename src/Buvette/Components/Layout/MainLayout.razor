@@ -1,10 +1,16 @@
 @inherits LayoutComponentBase
+@inject IConfiguration Configuration
 
 <header class="barre-haut">
     <a class="marque" href="/">
         <img class="logo" src="logo-ptitscoeurs.png" alt="Les P'tits Cœurs de Rexa" />
         Buvette
     </a>
+    @if (!string.IsNullOrWhiteSpace(Configuration["Buvette:MotDePasse"]))
+    {
+        @* Lien classique, pas de navigation Blazor : la déconnexion passe par le serveur. *@
+        <a class="deconnexion" href="/deconnexion" data-enhance-nav="false">Se déconnecter</a>
+    }
 </header>
 
 <main class="contenu">

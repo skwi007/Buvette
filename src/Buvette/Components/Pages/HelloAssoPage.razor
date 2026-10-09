@@ -1,0 +1,230 @@
+@page "/helloasso"
+@using Buvette.HelloAsso
+@inject HelloAssoClient HelloAsso
+@inject SynchroHelloAsso Synchro
+@inject BuvetteService Service
+@inject NavigationManager Nav
+
+<PageTitle>Buvette — HelloAsso</PageTitle>
+
+<div class="mb-2">
+    <a href="/" class="text-decoration-none">← Tous les événements</a>
+</div>
+<h1 class="mb-4">HelloAsso</h1>
+
+@if (!HelloAsso.Options.EstConfiguree)
+{
+    <div class="alert alert-warning">
+        <h2 class="h5">HelloAsso n'est pas encore configuré</h2>
+        <p class="mb-2">
+            La clé API de l'association n'est pas renseignée sur ce poste. Voir la section
+            « Configurer la clé API » de <code>docs/helloasso.md</code>.
+        </p>
+        <ul class="mb-0">
+            <li>Identifiant client : @(string.IsNullOrWhiteSpace(HelloAsso.Options.ClientId) ? "manquant" : "renseigné")</li>
+            <li>Secret : @(string.IsNullOrWhiteSpace(HelloAsso.Options.ClientSecret) ? "manquant" : "renseigné")</li>
+            <li>Organisation : @(string.IsNullOrWhiteSpace(HelloAsso.Options.Organisation) ? "manquante" : HelloAsso.Options.Organisation)</li>
+        </ul>
+    </div>
+    return;
+}
+
+<p class="text-secondary">
+    Association <strong>@HelloAsso.Options.Organisation</strong>
+    @if (!HelloAsso.Options.UrlApi.Contains("api.helloasso.com"))
+    {
+        <span class="badge text-bg-warning ms-1">bac à sable</span>
+    }
+</p>
+
+<button class="btn btn-primary btn-lg mb-4" @onclick="ChargerCampagnesAsync" disabled="@chargement">
+    @(chargement ? "Connexion…" : campagnes is null ? "Se connecter à HelloAsso" : "Actualiser")
+</button>
+
+@if (erreur is not null)
+{
+    <div class="alert alert-danger">@erreur</div>
+}
+
+@if (campagnes is not null)
+{
+    @if (campagnes.Count == 0)
+    {
+        <p class="fs-5">Connexion réussie, mais l'association n'a aucune campagne sur HelloAsso.</p>
+    }
+    else
+    {
+        <div class="alert alert-success">Connexion réussie : @campagnes.Count campagne(s).</div>
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr><th>Campagne</th><th>Type</th><th>État</th><th>Dates</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in campagnes)
+                    {
+                        <tr class="@(c == choisie ? "table-primary" : "")">
+                            <td>@c.Title <div class="small text-secondary">@c.FormSlug</div></td>
+                            <td>@Type(c.FormType)</td>
+                            <td>@Etat(c.State)</td>
+                            <td class="small">@Dates(c)</td>
+                            <td class="text-end text-nowrap">
+                                <button class="btn btn-outline-primary" @onclick="() => ChargerCommandesAsync(c)" disabled="@chargement">
+                                    Voir les commandes
+                                </button>
+                                @if (BuvetteLiee(c) is Evenement buvette)
+                                {
+                                    <a class="btn btn-success ms-1" href="/evenement/@buvette.Id">Ouvrir la buvette</a>
+                                }
+                                else if (c.VendDesArticles)
+                                {
+                                    <button class="btn btn-primary ms-1" @onclick="() => CreerBuvetteAsync(c)" disabled="@chargement"
+                                            title="Crée une buvette avec les articles et les commandes de cette campagne">
+                                        Créer la buvette
+                                    </button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@if (choisie is not null && commandes is not null)
+{
+    var valides = commandes.Where(c => !EstAnnulee(c)).ToList();
+    var articles = valides.SelectMany(c => c.Items ?? [])
+        .Where(a => !ArticleAnnule(a))
+        .GroupBy(a => a.Name ?? "(sans nom)")
+        .Select(g => (Nom: g.Key, Quantite: g.Count(), Montant: g.Sum(a => a.Montant)))
+        .OrderBy(a => a.Nom)
+        .ToList();
+
+    <h2 class="h4 mt-4">@choisie.Title</h2>
+    <p class="fs-5">
+        <strong>@valides.Count</strong> commande(s) — <strong>@valides.Sum(c => c.Total).ToString("C")</strong>
+        @if (commandes.Count > valides.Count)
+        {
+            <span class="text-secondary fs-6">(+ @(commandes.Count - valides.Count) annulée(s) ou remboursée(s), écartée(s))</span>
+        }
+    </p>
+
+    <h3 class="h5">Articles vendus</h3>
+    <table class="table table-sm w-auto">
+        <thead><tr><th>Article HelloAsso</th><th class="text-end">Quantité</th><th class="text-end">Montant</th></tr></thead>
+        <tbody>
+            @foreach (var a in articles)
+            {
+                <tr><td>@a.Nom</td><td class="text-end">@a.Quantite</td><td class="text-end">@a.Montant.ToString("C")</td></tr>
+            }
+        </tbody>
+    </table>
+
+    <h3 class="h5 mt-4">Commandes</h3>
+    <div class="table-responsive">
+        <table class="table table-sm">
+            <thead><tr><th>N°</th><th>Date</th><th>Nom</th><th>Articles</th><th class="text-end">Total</th></tr></thead>
+            <tbody>
+                @foreach (var c in commandes.OrderBy(c => c.Payer?.LastName))
+                {
+                    <tr class="@(EstAnnulee(c) ? "text-decoration-line-through text-secondary" : "")">
+                        <td>@c.Id</td>
+                        <td class="small">@c.Date.ToLocalTime().ToString("g")</td>
+                        <td>@c.Payer?.LastName?.ToUpperInvariant() @c.Payer?.FirstName</td>
+                        <td class="small">
+                            @string.Join(", ", (c.Items ?? []).GroupBy(a => a.Name).Select(g => g.Count() > 1 ? $"{g.Count()} × {g.Key}" : g.Key))
+                        </td>
+                        <td class="text-end">@c.Total.ToString("C")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<CampagneHelloAsso>? campagnes;
+    private CampagneHelloAsso? choisie;
+    private List<CommandeHelloAsso>? commandes;
+    private string? erreur;
+    private bool chargement;
+    private List<Evenement> buvettes = [];
+
+    private Task ChargerCampagnesAsync() => ExecuterAsync(async () =>
+    {
+        buvettes = await Service.ListerEvenementsAsync();
+        campagnes = (await HelloAsso.ListerCampagnesAsync())
+            .OrderByDescending(c => c.StartDate ?? DateTimeOffset.MinValue)
+            .ToList();
+        choisie = null;
+        commandes = null;
+    });
+
+    private Task ChargerCommandesAsync(CampagneHelloAsso campagne) => ExecuterAsync(async () =>
+    {
+        commandes = await HelloAsso.ListerCommandesAsync(campagne.FormType, campagne.FormSlug);
+        choisie = campagne;
+    });
+
+    private async Task ExecuterAsync(Func<Task> action)
+    {
+        chargement = true;
+        erreur = null;
+        try
+        {
+            await action();
+        }
+        catch (HelloAssoException e)
+        {
+            erreur = e.Message;
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    private Evenement? BuvetteLiee(CampagneHelloAsso c) =>
+        buvettes.FirstOrDefault(e => e.HelloAssoType == c.FormType && e.HelloAssoCampagne == c.FormSlug);
+
+    private async Task CreerBuvetteAsync(CampagneHelloAsso campagne)
+    {
+        int? id = null;
+        await ExecuterAsync(async () => id = await Synchro.CreerBuvetteAsync(campagne));
+        if (id is int nouvelle) Nav.NavigateTo($"/evenement/{nouvelle}");
+    }
+
+    private static bool EstAnnulee(CommandeHelloAsso c) => c.EstAnnulee;
+
+    private static bool ArticleAnnule(ArticleHelloAsso a) => a.EstAnnule;
+
+    private static string Type(string type) => type switch
+    {
+        "Shop" => "Boutique",
+        "Event" => "Billetterie",
+        "Membership" => "Adhésion",
+        "Donation" => "Don",
+        "CrowdFunding" => "Collecte",
+        "PaymentForm" => "Vente",
+        "Checkout" => "Paiement",
+        _ => type,
+    };
+
+    private static string Etat(string? etat) => etat switch
+    {
+        "Public" => "En ligne",
+        "Private" => "Privée",
+        "Draft" => "Brouillon",
+        "Disabled" => "Désactivée",
+        _ => etat ?? "",
+    };
+
+    private static string Dates(CampagneHelloAsso c) => (c.StartDate, c.EndDate) switch
+    {
+        ({ } debut, { } fin) => $"{debut.ToLocalTime():d} → {fin.ToLocalTime():d}",
+        ({ } debut, null) => $"depuis le {debut.ToLocalTime():d}",
+        _ => "",
+    };
+}

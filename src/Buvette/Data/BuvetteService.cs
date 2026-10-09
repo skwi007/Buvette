@@ -41,10 +41,17 @@ public record Recapitulatif(
     int NombreCommandes,
     decimal TotalVentes,
     int NombreOffertes,
-    decimal TotalOffert)
+    decimal TotalOffert,
+    ResumeHelloAsso? HelloAsso = null)
 {
-    /// <summary>Ce qui doit se trouver physiquement dans la caisse : fond de caisse + recettes.</summary>
+    /// <summary>
+    /// Ce qui doit se trouver physiquement dans la caisse : fond de caisse + recettes du
+    /// comptoir. Les préventes HelloAsso n'y sont pas : leur argent est sur le compte.
+    /// </summary>
     public decimal TotalEnCaisse => Evenement.FondDeCaisse + TotalVentes;
+
+    /// <summary>Toute la recette de la journée : comptoir et préventes HelloAsso.</summary>
+    public decimal RecetteTotale => TotalVentes + (HelloAsso?.Total ?? 0m);
 
     public decimal PanierMoyen => NombreCommandes == 0 ? 0m : TotalVentes / NombreCommandes;
 
@@ -60,6 +67,21 @@ public record Recapitulatif(
     /// <summary>Un écart de quelques centimes n'a pas à être signalé comme un problème.</summary>
     public bool EcartSignificatif => Ecart is decimal e && Math.Abs(e) >= 0.01m;
 }
+
+/// <summary>Un article prévendu sur HelloAsso, pour le récapitulatif.</summary>
+public record LigneHelloAsso(string Nom, int Quantite, decimal Montant, int QuantiteRetiree);
+
+/// <summary>
+/// Les préventes HelloAsso d'un événement. Les commandes annulées ou remboursées n'y
+/// figurent pas. <see cref="NonRetirees"/> liste celles payées mais jamais venues
+/// chercher : l'association décide ensuite si elle rembourse.
+/// </summary>
+public record ResumeHelloAsso(
+    int NombreCommandes,
+    int NombreRetirees,
+    decimal Total,
+    IReadOnlyList<LigneHelloAsso> Articles,
+    IReadOnlyList<PreCommande> NonRetirees);
 
 /// <summary>
 /// La commande demande plus d'articles qu'il n'en reste. Type dédié pour que l'écran
@@ -135,12 +157,38 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
         return produits.ToDictionary(p => p.Id, p => Restant(p, vendus)!.Value);
     }
 
-    private static async Task<Dictionary<int, int>> VendusParProduitAsync(BuvetteContext db, int evenementId) =>
-        await db.Lignes
+    /// <summary>
+    /// Tout ce qui est sorti du stock : ventes au comptoir et préventes HelloAsso. Une
+    /// prévente compte dès qu'elle est connue, retirée ou non : elle est payée, et la
+    /// caisse ne doit pas revendre à un autre client l'article qui l'attend.
+    /// </summary>
+    private static async Task<Dictionary<int, int>> VendusParProduitAsync(BuvetteContext db, int evenementId)
+    {
+        var vendus = await db.Lignes
             .Where(l => l.Commande!.EvenementId == evenementId && l.ProduitId != null)
             .GroupBy(l => l.ProduitId!.Value)
             .Select(g => new { ProduitId = g.Key, Quantite = g.Sum(l => l.Quantite) })
             .ToDictionaryAsync(x => x.ProduitId, x => x.Quantite);
+
+        foreach (var (produitId, quantite) in await PrevendusParProduitAsync(db, evenementId))
+            vendus[produitId] = vendus.GetValueOrDefault(produitId) + quantite;
+
+        return vendus;
+    }
+
+    private static async Task<Dictionary<int, int>> PrevendusParProduitAsync(BuvetteContext db, int evenementId) =>
+        await db.LignesPreCommandes
+            .Where(l => l.PreCommande!.EvenementId == evenementId && !l.PreCommande.Annulee && l.ProduitId != null)
+            .GroupBy(l => l.ProduitId!.Value)
+            .Select(g => new { ProduitId = g.Key, Quantite = g.Sum(l => l.Quantite) })
+            .ToDictionaryAsync(x => x.ProduitId, x => x.Quantite);
+
+    /// <summary>Quantité de chaque produit déjà payée sur HelloAsso, pour l'écran des produits.</summary>
+    public async Task<Dictionary<int, int>> PrevendusAsync(int evenementId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        return await PrevendusParProduitAsync(db, evenementId);
+    }
 
     /// <summary>
     /// Jamais négatif : baisser le stock sous ce qui a déjà été vendu doit afficher
@@ -432,6 +480,69 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
             commandes.Count(offerte => !offerte),
             recap.Sum(r => r.Montant),
             commandes.Count(offerte => offerte),
-            recap.Sum(r => r.MontantOffert));
+            recap.Sum(r => r.MontantOffert),
+            evenement.LieeAHelloAsso ? await ResumeHelloAssoAsync(db, evenementId) : null);
+    }
+
+    private static async Task<ResumeHelloAsso> ResumeHelloAssoAsync(BuvetteContext db, int evenementId)
+    {
+        var preCommandes = await db.PreCommandes
+            .Where(p => p.EvenementId == evenementId && !p.Annulee)
+            .Include(p => p.Lignes)
+            .OrderBy(p => p.Nom).ThenBy(p => p.Prenom)
+            .AsSplitQuery()
+            .ToListAsync();
+
+        var articles = preCommandes
+            .SelectMany(p => p.Lignes.Select(l => (Ligne: l, p.Retiree)))
+            .GroupBy(x => x.Ligne.NomArticle)
+            .Select(g => new LigneHelloAsso(
+                g.Key,
+                g.Sum(x => x.Ligne.Quantite),
+                g.Sum(x => x.Ligne.Montant),
+                g.Where(x => x.Retiree).Sum(x => x.Ligne.Quantite)))
+            .OrderByDescending(a => a.Montant).ThenBy(a => a.Nom)
+            .ToList();
+
+        return new ResumeHelloAsso(
+            preCommandes.Count,
+            preCommandes.Count(p => p.Retiree),
+            preCommandes.Sum(p => p.MontantPaye),
+            articles,
+            preCommandes.Where(p => !p.Retiree).ToList());
+    }
+
+    /// <summary>Les pré-commandes d'un événement, par ordre alphabétique pour le comptoir.</summary>
+    public async Task<List<PreCommande>> ListerPreCommandesAsync(int evenementId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        return await db.PreCommandes
+            .Where(p => p.EvenementId == evenementId)
+            .Include(p => p.Lignes)
+            .OrderBy(p => p.Nom).ThenBy(p => p.Prenom).ThenBy(p => p.NumeroHelloAsso)
+            .AsSplitQuery()
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Coche ou décoche « retirée ». Décocher sert à corriger un clic de travers : les
+    /// articles restent réservés dans les deux cas, seul le suivi du comptoir change.
+    /// </summary>
+    public async Task MarquerRetireeAsync(int preCommandeId, bool retiree)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var preCommande = await db.PreCommandes.FirstOrDefaultAsync(p => p.Id == preCommandeId)
+            ?? throw new InvalidOperationException("Cette pré-commande n'existe plus : la liste a peut-être été resynchronisée.");
+
+        if (retiree && preCommande.Annulee)
+            throw new InvalidOperationException(
+                $"La commande n° {preCommande.NumeroHelloAsso} a été annulée ou remboursée sur HelloAsso : rien à remettre.");
+
+        // Une seconde caisse qui coche la même commande ne doit pas écraser l'heure du premier retrait.
+        if (retiree == preCommande.Retiree) return;
+
+        preCommande.RetireeLe = retiree ? DateTime.Now : null;
+        await db.SaveChangesAsync();
+        notifications.Signaler(preCommande.EvenementId);
     }
 }

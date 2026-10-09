@@ -57,6 +57,17 @@ namespace Buvette.Data.Migrations
                     b.Property<decimal>("FondDeCaisse")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("HelloAssoCampagne")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("HelloAssoSynchroLe")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HelloAssoType")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal?>("MontantCompte")
                         .HasColumnType("TEXT");
 
@@ -102,6 +113,80 @@ namespace Buvette.Data.Migrations
                     b.ToTable("Lignes");
                 });
 
+            modelBuilder.Entity("Buvette.Data.LignePreCommande", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("Montant")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NomArticle")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PreCommandeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ProduitId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Quantite")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PreCommandeId");
+
+                    b.HasIndex("ProduitId");
+
+                    b.ToTable("LignesPreCommandes");
+                });
+
+            modelBuilder.Entity("Buvette.Data.PreCommande", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Annulee")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("DateCommande")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EvenementId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("MontantPaye")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Nom")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("NumeroHelloAsso")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Prenom")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RetireeLe")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EvenementId", "NumeroHelloAsso")
+                        .IsUnique();
+
+                    b.ToTable("PreCommandes");
+                });
+
             modelBuilder.Entity("Buvette.Data.Produit", b =>
                 {
                     b.Property<int>("Id")
@@ -126,6 +211,9 @@ namespace Buvette.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("StockInitial")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("TarifHelloAssoId")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
@@ -164,6 +252,35 @@ namespace Buvette.Data.Migrations
                     b.Navigation("Produit");
                 });
 
+            modelBuilder.Entity("Buvette.Data.LignePreCommande", b =>
+                {
+                    b.HasOne("Buvette.Data.PreCommande", "PreCommande")
+                        .WithMany("Lignes")
+                        .HasForeignKey("PreCommandeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Buvette.Data.Produit", "Produit")
+                        .WithMany()
+                        .HasForeignKey("ProduitId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("PreCommande");
+
+                    b.Navigation("Produit");
+                });
+
+            modelBuilder.Entity("Buvette.Data.PreCommande", b =>
+                {
+                    b.HasOne("Buvette.Data.Evenement", "Evenement")
+                        .WithMany("PreCommandes")
+                        .HasForeignKey("EvenementId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Evenement");
+                });
+
             modelBuilder.Entity("Buvette.Data.Produit", b =>
                 {
                     b.HasOne("Buvette.Data.Evenement", "Evenement")
@@ -184,7 +301,14 @@ namespace Buvette.Data.Migrations
                 {
                     b.Navigation("Commandes");
 
+                    b.Navigation("PreCommandes");
+
                     b.Navigation("Produits");
+                });
+
+            modelBuilder.Entity("Buvette.Data.PreCommande", b =>
+                {
+                    b.Navigation("Lignes");
                 });
 #pragma warning restore 612, 618
         }

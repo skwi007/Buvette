@@ -6,7 +6,10 @@
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <h1 class="mb-0">Buvettes</h1>
-    <button class="btn btn-primary btn-lg" @onclick="OuvrirFormulaire">+ Nouvel événement</button>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary btn-lg" href="/helloasso">HelloAsso</a>
+        <button class="btn btn-primary btn-lg" @onclick="OuvrirFormulaire">+ Nouvel événement</button>
+    </div>
 </div>
 
 @if (formulaireOuvert)
@@ -86,6 +89,10 @@ else
                             @if (!e.Cloture)
                             {
                                 <a class="btn btn-primary" href="/caisse/@e.Id">Caisse</a>
+                            }
+                            @if (e.LieeAHelloAsso)
+                            {
+                                <a class="btn btn-outline-primary" href="/precommandes/@e.Id">Pré-commandes</a>
                             }
                             <a class="btn btn-outline-secondary" href="/evenement/@e.Id">Produits</a>
                             <a class="btn btn-outline-secondary" href="/historique/@e.Id">Historique</a>

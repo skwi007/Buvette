@@ -23,6 +23,10 @@ else
             <p class="text-secondary mb-0">@evenement.Date.ToString("dddd d MMMM yyyy")</p>
         </div>
         <div class="d-flex gap-2">
+            @if (evenement.LieeAHelloAsso)
+            {
+                <a class="btn btn-outline-primary" href="/precommandes/@Id">Pré-commandes</a>
+            }
             <a class="btn btn-outline-secondary" href="/historique/@Id">Historique</a>
             <a class="btn btn-outline-secondary" href="/evenement/@Id">Produits</a>
         </div>

@@ -12,6 +12,7 @@ publish/
 *.db
 *.db-shm
 *.db-wal
+*.db*.bak*
 
 # Visual Studio / Rider / VS Code
 .vs/
@@ -22,3 +23,7 @@ publish/
 # Divers
 [Tt]est[Rr]esult*/
 *.log
+
+# Clés de chiffrement du cookie de connexion (propres à chaque serveur)
+cles/
+publie-freebox/

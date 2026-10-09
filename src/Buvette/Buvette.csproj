@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <!-- Secrets utilisateur (clé API HelloAsso) : stockés dans le profil Windows, hors du dépôt. -->
+    <UserSecretsId>buvette-ptitscoeurs-de-rexa</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

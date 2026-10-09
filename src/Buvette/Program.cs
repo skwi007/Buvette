@@ -2,9 +2,16 @@ using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Security.Claims;
 using System.Text;
 using Buvette.Components;
 using Buvette.Data;
+using Buvette.HelloAsso;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 
 // Prix en euros, dates et virgules décimales : toute l'application parle français.
@@ -27,9 +34,44 @@ var cheminBase = Path.Combine(builder.Environment.ContentRootPath, "buvette.db")
 builder.Services.AddDbContextFactory<BuvetteContext>(options =>
     options.UseSqlite($"Data Source={cheminBase}"));
 
+// La clé API HelloAsso reste hors du dépôt, dans les secrets utilisateur du PC. ASP.NET ne les
+// lit qu'en Development, or la buvette tourne en Production : on les ajoute explicitement.
+if (!builder.Environment.IsDevelopment())
+    builder.Configuration.AddUserSecrets<Program>(optional: true);
+
+builder.Services.Configure<HelloAssoOptions>(builder.Configuration.GetSection(HelloAssoOptions.Section));
+builder.Services.AddHttpClient(HelloAssoClient.NomClientHttp, http => http.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<HelloAssoClient>();
+builder.Services.AddScoped<SynchroHelloAsso>();
+
 // Singleton : c'est lui qui relie entre eux les téléphones connectés en même temps.
 builder.Services.AddSingleton<NotificationsBuvette>();
 builder.Services.AddScoped<BuvetteService>();
+
+// Mot de passe facultatif : défini seulement quand la buvette est exposée sur Internet
+// (variable d'environnement Buvette__MotDePasse sur la Freebox). Absent, rien ne change.
+var motDePasse = builder.Configuration["Buvette:MotDePasse"];
+var protegee = !string.IsNullOrWhiteSpace(motDePasse);
+if (protegee)
+{
+    builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+        .AddCookie(options =>
+        {
+            options.LoginPath = "/connexion";
+            options.Cookie.Name = "buvette";
+            // Un mois : on se connecte une fois sur la tablette, pas à chaque démonstration.
+            options.ExpireTimeSpan = TimeSpan.FromDays(30);
+            options.SlidingExpiration = true;
+        });
+    // Toute page, y compris la connexion temps réel de Blazor et l'export CSV, exige d'être connecté.
+    builder.Services.AddAuthorizationBuilder()
+        .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+    // Clés de chiffrement du cookie conservées à côté de la base : sans elles, chaque
+    // redémarrage du serveur déconnecterait toutes les tablettes.
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, "cles")));
+}
 
 var app = builder.Build();
 
@@ -47,9 +89,54 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+
+// Sur la Freebox, Caddy reçoit le HTTPS et transmet en HTTP local : sans ces en-têtes,
+// l'application se croirait en HTTP. Seul un proxy sur la machine elle-même est écouté.
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+});
+
+if (protegee)
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+}
 app.UseAntiforgery();
 
-app.MapStaticAssets();
+// Styles, logo et scripts restent publics : la page de connexion en a besoin.
+app.MapStaticAssets().AllowAnonymous();
+
+if (protegee)
+{
+    app.MapGet("/connexion", (string? returnUrl, string? erreur) =>
+            Results.Content(PageConnexion(returnUrl, erreur is not null), "text/html; charset=utf-8"))
+        .AllowAnonymous();
+
+    app.MapPost("/connexion", async (HttpContext http) =>
+    {
+        var formulaire = await http.Request.ReadFormAsync();
+        var retour = AccesProtege.RetourSur(formulaire["returnUrl"]);
+
+        if (!AccesProtege.Verifier(formulaire["motDePasse"], motDePasse!))
+        {
+            // Une seconde de pénalité : rend inutile l'essai de milliers de mots de passe.
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            return Results.Redirect($"/connexion?erreur=1&returnUrl={Uri.EscapeDataString(retour)}");
+        }
+
+        var identite = new ClaimsIdentity([new Claim(ClaimTypes.Name, "benevole")],
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        await http.SignInAsync(new ClaimsPrincipal(identite), new AuthenticationProperties { IsPersistent = true });
+        return Results.Redirect(retour);
+    }).AllowAnonymous().DisableAntiforgery();
+
+    app.MapGet("/deconnexion", async (HttpContext http) =>
+    {
+        await http.SignOutAsync();
+        return Results.Redirect("/connexion");
+    });
+}
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
@@ -79,6 +166,25 @@ app.MapGet("/export/{id:int}", async (int id, BuvetteService service) =>
         csv.AppendLine($"Ecart;;;{recap.Ecart!.Value:0.00}");
     }
 
+    if (recap.HelloAsso is { } helloAsso)
+    {
+        csv.AppendLine();
+        csv.AppendLine("Preventes HelloAsso;Quantite prepayee;Quantite remise;Montant");
+        foreach (var article in helloAsso.Articles)
+            csv.AppendLine($"{Echapper(article.Nom)};{article.Quantite};{article.QuantiteRetiree};{article.Montant:0.00}");
+        csv.AppendLine($"Commandes HelloAsso;{helloAsso.NombreCommandes};{helloAsso.NombreRetirees};{helloAsso.Total:0.00}");
+        csv.AppendLine($"Recette totale (caisse + HelloAsso);;;{recap.RecetteTotale:0.00}");
+
+        if (helloAsso.NonRetirees.Count > 0)
+        {
+            csv.AppendLine();
+            csv.AppendLine("Commandes HelloAsso non retirees;Nom;Articles;Montant");
+            foreach (var p in helloAsso.NonRetirees)
+                csv.AppendLine($"{p.NumeroHelloAsso};{Echapper($"{p.Nom} {p.Prenom}")};" +
+                               $"{Echapper(string.Join(", ", p.Lignes.Select(l => $"{l.Quantite} x {l.NomArticle}")))};{p.MontantPaye:0.00}");
+        }
+    }
+
     // BOM UTF-8 : sans lui, Excel affiche « tarte flambée » en mojibake.
     var contenu = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
     var nom = $"buvette-{Nettoyer(recap.Evenement.Nom)}-{recap.Evenement.Date:yyyy-MM-dd}.csv";
@@ -92,6 +198,39 @@ app.MapGet("/export/{id:int}", async (int id, BuvetteService service) =>
 AfficherAdressesReseau(app);
 
 app.Run();
+
+// Page volontairement hors Blazor : elle doit s'afficher avant toute connexion temps réel.
+static string PageConnexion(string? retour, bool erreur)
+{
+    var champRetour = WebUtility.HtmlEncode(AccesProtege.RetourSur(retour));
+    var message = erreur
+        ? """<div class="alert alert-danger">Mot de passe incorrect.</div>"""
+        : "";
+    return $$"""
+        <!DOCTYPE html>
+        <html lang="fr">
+        <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>Connexion – Buvette</title>
+            <link rel="stylesheet" href="/lib/bootstrap/dist/css/bootstrap.min.css" />
+            <link rel="icon" type="image/png" href="/favicon.png" />
+        </head>
+        <body class="d-flex align-items-center justify-content-center" style="min-height:100vh">
+            <form method="post" action="/connexion" class="card p-4 shadow-sm" style="width:100%;max-width:22rem">
+                <img src="/logo-ptitscoeurs.png" alt="Les P'tits Cœurs de Rexa" class="mx-auto mb-3" style="max-height:5rem" />
+                <h1 class="h4 text-center mb-3">Buvette</h1>
+                {{message}}
+                <input type="hidden" name="returnUrl" value="{{champRetour}}" />
+                <label for="motDePasse" class="form-label">Mot de passe</label>
+                <input id="motDePasse" name="motDePasse" type="password" class="form-control form-control-lg mb-3"
+                       autocomplete="current-password" autofocus required />
+                <button type="submit" class="btn btn-primary btn-lg w-100">Entrer</button>
+            </form>
+        </body>
+        </html>
+        """;
+}
 
 // Les bénévoles prennent les commandes sur tablette : l'adresse à taper doit être visible au lancement.
 static void AfficherAdressesReseau(WebApplication app)

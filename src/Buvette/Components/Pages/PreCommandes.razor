@@ -1,0 +1,269 @@
+@page "/precommandes/{Id:int}"
+@using System.Globalization
+@using System.Text
+@using Buvette.HelloAsso
+@inject BuvetteService Service
+@inject SynchroHelloAsso Synchro
+@inject NotificationsBuvette Notifications
+@inject ILogger<PreCommandes> Journal
+@implements IDisposable
+
+<PageTitle>@(evenement?.Nom ?? "Pré-commandes") — pré-commandes</PageTitle>
+
+@if (introuvable)
+{
+    <h1>Événement introuvable</h1>
+    <a class="btn btn-primary" href="/">Retour à la liste</a>
+}
+else if (evenement is null)
+{
+    <p class="text-secondary">Chargement…</p>
+}
+else
+{
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h1 class="h3 mb-0">Pré-commandes HelloAsso</h1>
+            <p class="text-secondary mb-0">@evenement.Nom — @evenement.Date.ToString("dddd d MMMM yyyy")</p>
+        </div>
+        <div class="d-flex gap-2">
+            @if (!evenement.Cloture)
+            {
+                <a class="btn btn-outline-secondary" href="/caisse/@Id">Caisse</a>
+            }
+            <a class="btn btn-outline-secondary" href="/evenement/@Id">Produits</a>
+        </div>
+    </div>
+
+    @if (!evenement.LieeAHelloAsso)
+    {
+        <div class="alert alert-info">
+            Cette buvette n'est liée à aucune campagne HelloAsso. Choisissez-en une depuis la page
+            <a href="/evenement/@Id">Produits</a>.
+        </div>
+        return;
+    }
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="fs-5">
+            <strong>@valides.Count(p => p.Retiree)</strong> retirée@(valides.Count(p => p.Retiree) > 1 ? "s" : "")
+            sur <strong>@valides.Count</strong>
+        </span>
+        <button class="btn btn-sm btn-outline-primary ms-auto" @onclick="SynchroniserAsync" disabled="@synchroEnCours">
+            @(synchroEnCours ? "Synchronisation…" : "Actualiser depuis HelloAsso")
+        </button>
+        @if (evenement.HelloAssoSynchroLe is DateTime le)
+        {
+            <span class="text-secondary small">à jour au @le.ToString("dd/MM HH:mm")</span>
+        }
+    </div>
+
+    @if (message is not null)
+    {
+        <div class="alert alert-success py-2" role="status">@message</div>
+    }
+    @if (erreur is not null)
+    {
+        <div class="alert alert-danger py-2" role="alert">@erreur</div>
+    }
+
+    <input class="form-control form-control-lg mb-2" type="search" placeholder="Nom ou n° de commande"
+           aria-label="Rechercher une pré-commande" autocomplete="off"
+           @bind="recherche" @bind:event="oninput" />
+
+    <div class="btn-group mb-3" role="group" aria-label="Filtrer">
+        @foreach (var (valeur, libelle) in Filtres)
+        {
+            <button class="btn @(filtre == valeur ? "btn-primary" : "btn-outline-primary")" @onclick="() => filtre = valeur">
+                @libelle
+            </button>
+        }
+    </div>
+
+    @if (Affichees.Count == 0)
+    {
+        <p class="text-secondary fs-5">
+            @(preCommandes.Count == 0 ? "Aucune commande sur HelloAsso pour l'instant."
+              : recherche.Length > 0 ? "Aucune pré-commande ne correspond à cette recherche."
+              : filtre == Filtre.ARetirer ? "Toutes les pré-commandes ont été retirées." : "Aucune pré-commande.")
+        </p>
+    }
+
+    <ul class="list-group precommandes">
+        @foreach (var p in Affichees)
+        {
+            <li class="list-group-item @(p.Annulee ? "annulee" : p.Retiree ? "retiree" : "")" @key="p.Id">
+                <label class="d-flex align-items-start gap-3 mb-0">
+                    <input class="form-check-input precommande-case" type="checkbox" checked="@p.Retiree"
+                           disabled="@(p.Annulee || enCours.Contains(p.Id))"
+                           aria-label="Commande @p.NumeroHelloAsso retirée"
+                           @onchange="e => BasculerAsync(p, (bool)e.Value!)" />
+                    <span class="flex-grow-1">
+                        <span class="d-flex flex-wrap justify-content-between gap-2">
+                            <span class="fs-5">
+                                <strong>@p.Nom.ToUpper(CultureInfo.CurrentCulture)</strong> @p.Prenom
+                            </span>
+                            <span class="text-secondary">n° @p.NumeroHelloAsso</span>
+                        </span>
+                        <span class="d-block precommande-articles">
+                            @foreach (var l in p.Lignes.OrderBy(l => l.NomArticle))
+                            {
+                                <span class="badge text-bg-light border me-1 mb-1">@l.Quantite × @l.NomArticle</span>
+                            }
+                        </span>
+                        <span class="d-block small text-secondary">
+                            @if (p.Annulee)
+                            {
+                                <span class="badge text-bg-danger">annulée ou remboursée — rien à remettre</span>
+                            }
+                            else if (p.RetireeLe is DateTime retrait)
+                            {
+                                <span>Retirée à @retrait.ToString("HH:mm")</span>
+                            }
+                            else
+                            {
+                                <span>Payée @p.MontantPaye.ToString("C2") le @p.DateCommande.ToString("dd/MM")</span>
+                            }
+                        </span>
+                    </span>
+                </label>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private enum Filtre { ARetirer, Retirees, Toutes }
+
+    private static readonly (Filtre, string)[] Filtres =
+        [(Filtre.ARetirer, "À retirer"), (Filtre.Retirees, "Retirées"), (Filtre.Toutes, "Toutes")];
+
+    private Evenement? evenement;
+    private List<PreCommande> preCommandes = [];
+    private List<PreCommande> valides = [];
+    private bool introuvable;
+    private string recherche = "";
+    private Filtre filtre = Filtre.ARetirer;
+    private readonly HashSet<int> enCours = [];
+    private bool synchroEnCours;
+    private string? message;
+    private string? erreur;
+
+    /// <summary>
+    /// Au comptoir, le client donne son nom ou le numéro reçu par e-mail : on cherche dans
+    /// les deux, sans tenir compte des accents ni des majuscules.
+    /// </summary>
+    private List<PreCommande> Affichees
+    {
+        get
+        {
+            var termes = SansAccents(recherche).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return preCommandes
+                .Where(p => filtre switch
+                {
+                    Filtre.ARetirer => !p.Retiree && !p.Annulee,
+                    Filtre.Retirees => p.Retiree,
+                    _ => true,
+                })
+                .Where(p =>
+                {
+                    var texte = SansAccents($"{p.Nom} {p.Prenom} {p.NumeroHelloAsso}");
+                    return termes.All(t => texte.Contains(t));
+                })
+                .ToList();
+        }
+    }
+
+    private static string SansAccents(string texte) =>
+        new string(texte.Normalize(NormalizationForm.FormD)
+                .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                .ToArray())
+            .ToLowerInvariant();
+
+    protected override void OnInitialized() => Notifications.EvenementModifie += SurEvenementModifie;
+
+    protected override async Task OnParametersSetAsync() => await ChargerAsync();
+
+    private async Task ChargerAsync()
+    {
+        evenement = await Service.ChargerEvenementAsync(Id);
+        introuvable = evenement is null;
+        preCommandes = evenement is null ? [] : await Service.ListerPreCommandesAsync(Id);
+        valides = preCommandes.Where(p => !p.Annulee).ToList();
+    }
+
+    /// <summary>Une commande cochée sur un téléphone apparaît cochée sur tous les autres.</summary>
+    private void SurEvenementModifie(int evenementId)
+    {
+        if (evenementId == Id) _ = InvokeAsync(RafraichirAsync);
+    }
+
+    private async Task RafraichirAsync()
+    {
+        try
+        {
+            await ChargerAsync();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Journal.LogWarning(ex, "Mise à jour en direct des pré-commandes impossible pour l'événement {Evenement}", Id);
+        }
+    }
+
+    public void Dispose() => Notifications.EvenementModifie -= SurEvenementModifie;
+
+    private async Task BasculerAsync(PreCommande p, bool retiree)
+    {
+        enCours.Add(p.Id);
+        erreur = null;
+        message = null;
+        try
+        {
+            await Service.MarquerRetireeAsync(p.Id, retiree);
+            if (retiree) recherche = "";   // prêt pour le client suivant
+        }
+        catch (InvalidOperationException ex)
+        {
+            erreur = ex.Message;
+        }
+        finally
+        {
+            enCours.Remove(p.Id);
+            await ChargerAsync();
+        }
+    }
+
+    private async Task SynchroniserAsync()
+    {
+        synchroEnCours = true;
+        erreur = null;
+        message = null;
+        try
+        {
+            var resultat = await Synchro.SynchroniserAsync(Id);
+            message = Bilan(resultat);
+        }
+        catch (Exception ex) when (ex is HelloAssoException or InvalidOperationException)
+        {
+            erreur = ex.Message;
+        }
+        finally
+        {
+            synchroEnCours = false;
+            await ChargerAsync();
+        }
+    }
+
+    internal static string Bilan(ResultatSynchro r)
+    {
+        var details = new List<string>();
+        if (r.Nouvelles > 0) details.Add($"{r.Nouvelles} nouvelle{(r.Nouvelles > 1 ? "s" : "")}");
+        if (r.NouvellesAnnulees > 0) details.Add($"{r.NouvellesAnnulees} annulée{(r.NouvellesAnnulees > 1 ? "s" : "")} depuis");
+        if (r.ProduitsCrees > 0) details.Add($"{r.ProduitsCrees} produit{(r.ProduitsCrees > 1 ? "s" : "")} ajouté{(r.ProduitsCrees > 1 ? "s" : "")}");
+        return $"HelloAsso synchronisé : {r.PreCommandes} commande{(r.PreCommandes > 1 ? "s" : "")}"
+               + (details.Count > 0 ? $" ({string.Join(", ", details)})." : ", rien de nouveau.");
+    }
+}

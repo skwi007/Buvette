@@ -84,6 +84,30 @@ else
                 </div>
             </div>
         }
+        @if (recap.HelloAsso is { } helloAsso)
+        {
+            <div class="col-6 col-lg-3">
+                <div class="card chiffre h-100 border-info">
+                    <div class="card-body">
+                        <div class="chiffre-libelle">Prépayé HelloAsso</div>
+                        <div class="chiffre-valeur">@helloAsso.Total.ToString("C2")</div>
+                        <div class="text-secondary small">
+                            @helloAsso.NombreRetirees retirée@(helloAsso.NombreRetirees > 1 ? "s" : "") sur @helloAsso.NombreCommandes,
+                            hors tiroir
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="card chiffre h-100">
+                    <div class="card-body">
+                        <div class="chiffre-libelle">Recette totale</div>
+                        <div class="chiffre-valeur">@recap.RecetteTotale.ToString("C2")</div>
+                        <div class="text-secondary small">comptoir + HelloAsso</div>
+                    </div>
+                </div>
+            </div>
+        }
         @if (recap.Compte)
         {
             <div class="col-6 col-lg-3">
@@ -180,6 +204,66 @@ else
                 </tfoot>
             </table>
         </div>
+    }
+
+    @if (recap.HelloAsso is { } prevente)
+    {
+        <h2 class="h4 mb-3">
+            Préventes HelloAsso
+            <a class="btn btn-sm btn-outline-primary align-middle ms-2" href="/precommandes/@Id">Pré-commandes</a>
+        </h2>
+        @if (prevente.Articles.Count == 0)
+        {
+            <p class="text-secondary">Aucune commande HelloAsso.</p>
+        }
+        else
+        {
+            <div class="table-responsive mb-3">
+                <table class="table table-striped align-middle">
+                    <thead>
+                        <tr>
+                            <th scope="col">Article</th>
+                            <th scope="col" class="text-end">Prépayés</th>
+                            <th scope="col" class="text-end">Remis</th>
+                            <th scope="col" class="text-end">Montant</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in prevente.Articles)
+                        {
+                            <tr>
+                                <td>@a.Nom</td>
+                                <td class="text-end fw-semibold">@a.Quantite</td>
+                                <td class="text-end">@a.QuantiteRetiree</td>
+                                <td class="text-end">@a.Montant.ToString("C2")</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot class="table-group-divider">
+                        <tr class="fw-bold fs-5">
+                            <td colspan="3">Total prépayé (sur le compte, pas dans le tiroir)</td>
+                            <td class="text-end">@prevente.Total.ToString("C2")</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        }
+        @if (prevente.NonRetirees.Count > 0)
+        {
+            <div class="alert alert-warning mb-4">
+                <strong>@prevente.NonRetirees.Count commande@(prevente.NonRetirees.Count > 1 ? "s" : "") payée@(prevente.NonRetirees.Count > 1 ? "s" : "") non retirée@(prevente.NonRetirees.Count > 1 ? "s" : "")</strong>
+                <ul class="mb-0 mt-1">
+                    @foreach (var p in prevente.NonRetirees)
+                    {
+                        <li>
+                            n° @p.NumeroHelloAsso — @p.Nom.ToUpper() @p.Prenom :
+                            @string.Join(", ", p.Lignes.Select(l => $"{l.Quantite} × {l.NomArticle}"))
+                            (@p.MontantPaye.ToString("C2"))
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
     }
 
     <h2 class="h4 mb-3">Comptage de la caisse</h2>

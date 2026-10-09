@@ -27,8 +27,25 @@ public class Evenement
     [Range(0, 1000000, ErrorMessage = "Le montant compté doit être positif.")]
     public decimal? MontantCompte { get; set; }
 
+    /// <summary>
+    /// Type de la campagne HelloAsso liée (« Event », « Shop »…), ou <c>null</c> pour une
+    /// buvette sans prévente. L'API désigne une campagne par ce type et son identifiant.
+    /// </summary>
+    [MaxLength(40)]
+    public string? HelloAssoType { get; set; }
+
+    /// <summary>Identifiant de la campagne dans son adresse HelloAsso (« saint-martin »).</summary>
+    [MaxLength(200)]
+    public string? HelloAssoCampagne { get; set; }
+
+    /// <summary>Dernière synchronisation réussie, pour savoir si la liste est à jour.</summary>
+    public DateTime? HelloAssoSynchroLe { get; set; }
+
+    public bool LieeAHelloAsso => HelloAssoType is not null && HelloAssoCampagne is not null;
+
     public List<Produit> Produits { get; set; } = [];
     public List<Commande> Commandes { get; set; } = [];
+    public List<PreCommande> PreCommandes { get; set; } = [];
 }
 
 /// <summary>Un article vendu à la buvette, avec son prix pour cet événement.</summary>
@@ -59,6 +76,13 @@ public class Produit
 
     /// <summary>Produit retiré de la vente (épuisé) mais conservé dans l'historique.</summary>
     public bool Actif { get; set; } = true;
+
+    /// <summary>
+    /// Tarif HelloAsso vendu sous ce produit, ou <c>null</c> pour un produit vendu seulement
+    /// au comptoir. On s'appuie sur l'identifiant et non sur le libellé : HelloAsso laisse
+    /// traîner des espaces en fin de libellé, et l'association peut renommer le produit ici.
+    /// </summary>
+    public long? TarifHelloAssoId { get; set; }
 }
 
 /// <summary>Un passage en caisse : ce qu'une personne a acheté en une fois.</summary>
@@ -105,4 +129,61 @@ public class LigneCommande
     public int Quantite { get; set; }
 
     public decimal SousTotal => PrixUnitaire * Quantite;
+}
+
+/// <summary>
+/// Une commande payée d'avance sur HelloAsso, à remettre au comptoir. Ce n'est pas une
+/// <see cref="Commande"/> : son argent n'est jamais passé par le tiroir.
+/// </summary>
+/// <remarks>
+/// Ses articles sortent du stock dès la synchronisation, retirés ou non : ils sont payés,
+/// et la caisse ne doit pas les revendre à quelqu'un d'autre.
+/// </remarks>
+public class PreCommande
+{
+    public int Id { get; set; }
+    public int EvenementId { get; set; }
+    public Evenement? Evenement { get; set; }
+
+    /// <summary>Numéro de commande HelloAsso, celui que le client a reçu par e-mail.</summary>
+    public long NumeroHelloAsso { get; set; }
+
+    [MaxLength(120)]
+    public string Nom { get; set; } = "";
+
+    [MaxLength(120)]
+    public string Prenom { get; set; } = "";
+
+    public DateTime DateCommande { get; set; }
+
+    /// <summary>Ce qui a été payé sur HelloAsso pour les articles non annulés.</summary>
+    public decimal MontantPaye { get; set; }
+
+    /// <summary>Remboursée ou annulée sur HelloAsso : rien à remettre, rien de réservé.</summary>
+    public bool Annulee { get; set; }
+
+    /// <summary>Heure de remise au client, ou <c>null</c> tant qu'il n'est pas passé.</summary>
+    public DateTime? RetireeLe { get; set; }
+
+    public List<LignePreCommande> Lignes { get; set; } = [];
+
+    public bool Retiree => RetireeLe is not null;
+}
+
+/// <summary>Un article d'une pré-commande, regroupé par tarif HelloAsso.</summary>
+public class LignePreCommande
+{
+    public int Id { get; set; }
+    public int PreCommandeId { get; set; }
+    public PreCommande? PreCommande { get; set; }
+
+    public int? ProduitId { get; set; }
+    public Produit? Produit { get; set; }
+
+    /// <summary>Libellé HelloAsso, recopié pour rester lisible si le produit est supprimé.</summary>
+    [MaxLength(200)]
+    public string NomArticle { get; set; } = "";
+
+    public int Quantite { get; set; }
+    public decimal Montant { get; set; }
 }

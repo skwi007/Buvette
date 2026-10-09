@@ -62,6 +62,79 @@ dotnet publish src/Buvette -c Release -r win-x64 --self-contained -o publie
 
 `publie\Buvette.exe` se lance alors par un double-clic, sans rien installer.
 
+## Démonstration en ligne sur la Freebox Delta
+
+Pour montrer la buvette aux membres de l'association avant l'événement, elle peut tourner
+en permanence dans une machine virtuelle de la Freebox Delta, accessible depuis Internet
+en HTTPS et protégée par un mot de passe.
+
+**Le guide complet, écran par écran, avec la maintenance et le dépannage, est dans
+[docs/deploiement-freebox.md](docs/deploiement-freebox.md).** Ci-dessous, l'essentiel.
+
+Le jour J, on reste de préférence sur le PC portable : Blazor garde une connexion
+permanente avec le serveur, et une 4G faible sur le lieu de l'événement afficherait
+« reconnexion… » en plein encaissement.
+
+### Le mot de passe
+
+Il n'existe que si la variable d'environnement `Buvette__MotDePasse` est définie. Sans
+elle, rien ne change : le PC du jour J reste ouvert au réseau local comme avant.
+
+Une fois défini, chaque appareil le saisit une fois et reste connecté un mois. La
+majuscule mise d'office par le clavier des tablettes est ignorée, de même que les espaces
+autour. Chaque erreur coûte une seconde d'attente, ce qui rend inutile l'essai en masse.
+Le lien *Se déconnecter* apparaît alors en haut à droite.
+
+### Préparer la Freebox (une seule fois)
+
+1. **Créer la VM** dans Freebox OS, menu *VMs* : image Debian ou Ubuntu (la Freebox Delta
+   a un processeur ARM, l'image proposée l'est aussi), 1 Go de mémoire suffit. Y coller sa
+   clé SSH publique (`ssh-keygen` sous Windows pour en créer une, puis le contenu de
+   `%USERPROFILE%\.ssh\id_ed25519.pub`).
+2. **Fixer l'adresse de la VM** : *Paramètres de la Freebox › DHCP › Baux statiques*.
+3. **Avoir une IPv4 publique entière** : si l'abonnement est en IP partagée, demander l'IP
+   *full-stack* dans l'espace abonné Free. Sans elle, les ports 80 et 443 ne sont pas
+   disponibles.
+4. **Rediriger les ports** TCP 80 et 443 vers l'adresse de la VM : *Paramètres de la
+   Freebox › Gestion des ports*. L'accès à distance de Freebox OS doit utiliser un autre port.
+5. **Un nom de domaine** pointant vers l'IP publique de la Freebox : sous-domaine d'un domaine
+   de l'association, ou nom gratuit (DuckDNS, par exemple). Le certificat HTTPS est ensuite
+   obtenu et renouvelé automatiquement par Caddy.
+
+### Installer et mettre à jour
+
+Depuis le PC de développement, à la racine du dépôt :
+
+```powershell
+# Première fois : installe Caddy, le service et le mot de passe (demandé au clavier).
+.\deploy\freebox\deployer.ps1 -Vm utilisateur@192.168.1.60 -Installer -Domaine buvette.mondomaine.fr
+
+# Ensuite, après chaque évolution du code :
+.\deploy\freebox\deployer.ps1 -Vm utilisateur@192.168.1.60
+```
+
+Le script publie l'application pour Linux ARM64 (autonome, sans .NET à installer sur la VM),
+l'envoie et redémarre le service. La base de la VM n'est jamais écrasée, et elle est copiée
+dans `/opt/buvette/sauvegardes/` avant chaque mise à jour et chaque nuit (30 jours conservés).
+
+| Sur la VM | Rôle |
+| --- | --- |
+| `/opt/buvette/app/` | Application, base `buvette.db` et clés de connexion `cles/` |
+| `/opt/buvette/sauvegardes/` | Copies de la base |
+| `/etc/buvette.env` | Mot de passe (changer puis `sudo systemctl restart buvette`) |
+| `/etc/caddy/Caddyfile` | Nom de domaine et HTTPS |
+| `journalctl -u buvette -f` | Journal de l'application en direct |
+
+## Préventes HelloAsso
+
+La page **HelloAsso** (bouton sur l'accueil) se connecte à l'API HelloAsso de l'association
+et affiche ses campagnes et leurs commandes. **Créer la buvette** transforme une billetterie
+ou une boutique en buvette : ses articles deviennent des produits, ses commandes des
+pré-commandes à cocher au comptoir, déduites du stock et comptées à part du tiroir.
+
+La configuration de la clé API, sur le PC comme sur la Freebox, et le mode d'emploi sont
+décrits dans [docs/helloasso.md](docs/helloasso.md).
+
 ## Utilisation
 
 ### 1. Créer l'événement et sa carte
@@ -167,7 +240,7 @@ l'association n'ont pas à être publiées avec le code.
 dotnet test
 ```
 
-148 tests xUnit couvrent les règles métier, dans `tests/Buvette.Tests/`.
+182 tests xUnit couvrent les règles métier, dans `tests/Buvette.Tests/`.
 Ils tournent sur un vrai moteur SQLite, recréé pour chaque test : les cascades de
 suppression, les migrations et le stockage des montants sont donc réellement exercés,
 pas simulés. Les tests de concurrence utilisent un fichier temporaire, seule façon de
@@ -190,12 +263,15 @@ Ils couvrent en priorité les points où une erreur coûterait de l'argent à l'
 | --- | --- |
 | `Buvette.slnx` | Solution regroupant l'application et ses tests |
 | `Lancer-buvette.cmd` | Démarrage en un double-clic le jour de l'événement |
+| `deploy/freebox/` | Installation et mise à jour de la démonstration sur la Freebox |
 | `src/Buvette/Program.cs` | Démarrage, base de données, export CSV |
 | `src/Buvette/Data/Modeles.cs` | Événement, produit, commande, ligne de commande |
 | `src/Buvette/Data/BuvetteContext.cs` | Configuration EF Core et relations |
 | `src/Buvette/Data/BuvetteService.cs` | Règles métier : encaissement, récapitulatif |
 | `src/Buvette/Data/Prix.cs` | Lecture des montants saisis (virgule ou point) |
 | `src/Buvette/Data/AdressesReseau.cs` | Tri des adresses réseau proposées aux tablettes |
+| `src/Buvette/Data/AccesProtege.cs` | Vérification du mot de passe facultatif |
+| `src/Buvette/HelloAsso/` | Client de l'API HelloAsso (jeton, campagnes, commandes) |
 | `src/Buvette/Data/Migrations/` | Migrations EF Core du schéma |
 | `src/Buvette/Components/Pages/Home.razor` | Liste et création des événements |
 | `src/Buvette/Components/Pages/EvenementPage.razor` | Réglages et carte des produits |

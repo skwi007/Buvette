@@ -1,6 +1,9 @@
 @page "/evenement/{Id:int}"
 @inject BuvetteService Service
 @inject NavigationManager Nav
+@inject HelloAssoClient HelloAsso
+@inject SynchroHelloAsso Synchro
+@using Buvette.HelloAsso
 
 <PageTitle>@(evenement?.Nom ?? "Événement") — produits</PageTitle>
 
@@ -66,6 +69,79 @@ else
         </div>
     </div>
 
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h5 mb-3">Préventes HelloAsso</h2>
+            @if (evenement.LieeAHelloAsso)
+            {
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <span>
+                        Campagne <strong>@evenement.HelloAssoCampagne</strong>
+                        @if (evenement.HelloAssoSynchroLe is DateTime le)
+                        {
+                            <span class="text-secondary small d-block">dernière synchronisation le @le.ToString("dd/MM à HH:mm")</span>
+                        }
+                    </span>
+                    <div class="ms-auto d-flex flex-wrap gap-2">
+                        <a class="btn btn-primary" href="/precommandes/@Id">Pré-commandes</a>
+                        <button class="btn btn-outline-primary" @onclick="SynchroniserAsync" disabled="@helloAssoEnCours">
+                            @(helloAssoEnCours ? "Synchronisation…" : "Synchroniser")
+                        </button>
+                        @if (delierDemande)
+                        {
+                            <span class="align-self-center small">Délier et oublier les pré-commandes&nbsp;?</span>
+                            <button class="btn btn-danger" @onclick="DelierAsync">Oui</button>
+                            <button class="btn btn-outline-secondary" @onclick="() => delierDemande = false">Non</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-danger" @onclick="() => delierDemande = true">Délier</button>
+                        }
+                    </div>
+                </div>
+            }
+            else if (campagnes is null)
+            {
+                <p class="mb-2">
+                    Si des produits ont été vendus en avance sur HelloAsso, liez cette buvette à la
+                    campagne : ses articles deviennent des produits, et ses commandes s'affichent pour
+                    être remises au comptoir.
+                </p>
+                <button class="btn btn-outline-primary" @onclick="ChargerCampagnesAsync" disabled="@helloAssoEnCours">
+                    @(helloAssoEnCours ? "Connexion…" : "Lier à une campagne HelloAsso")
+                </button>
+            }
+            else
+            {
+                <div class="d-flex flex-wrap gap-2 align-items-end">
+                    <div class="flex-grow-1">
+                        <label class="form-label" for="campagne">Campagne</label>
+                        <select id="campagne" class="form-select" @bind="campagneChoisie">
+                            <option value="">— Choisir —</option>
+                            @foreach (var c in campagnes)
+                            {
+                                <option value="@($"{c.FormType}/{c.FormSlug}")">@c.Title (@c.FormSlug)</option>
+                            }
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" disabled="@(string.IsNullOrEmpty(campagneChoisie) || helloAssoEnCours)"
+                            @onclick="LierAsync">
+                        @(helloAssoEnCours ? "Import…" : "Lier et importer")
+                    </button>
+                    <button class="btn btn-outline-secondary" @onclick="() => campagnes = null">Annuler</button>
+                </div>
+            }
+            @if (helloAssoMessage is not null)
+            {
+                <p class="text-success mt-2 mb-0">@helloAssoMessage</p>
+            }
+            @if (helloAssoErreur is not null)
+            {
+                <div class="alert alert-danger mt-2 mb-0">@helloAssoErreur</div>
+            }
+        </div>
+    </div>
+
     <h2 class="h4 mb-3">Produits de la buvette</h2>
 
     @if (erreur is not null)
@@ -104,6 +180,10 @@ else
                         <td>
                             <input class="form-control" value="@p.Nom" aria-label="Nom du produit"
                                    @onchange="e => ModifierNom(p, e.Value?.ToString())" />
+                            @if (p.TarifHelloAssoId is not null)
+                            {
+                                <span class="badge text-bg-info mt-1">aussi vendu sur HelloAsso</span>
+                            }
                         </td>
                         <td>
                             <input class="form-control" type="number" step="0.01" min="0" inputmode="decimal"
@@ -127,6 +207,10 @@ else
                                 <span class="badge @(restant == 0 ? "text-bg-danger" : restant <= 5 ? "text-bg-warning" : "text-bg-success")">
                                     @(restant == 0 ? "épuisé" : $"{restant} restant{(restant > 1 ? "s" : "")}")
                                 </span>
+                            }
+                            @if (prevendus.GetValueOrDefault(p.Id) is > 0 and var prevendu)
+                            {
+                                <span class="d-block small text-secondary">@prevendu prépayé@(prevendu > 1 ? "s" : "") HelloAsso</span>
                             }
                         </td>
                         <td>
@@ -186,6 +270,14 @@ else
     <p class="text-secondary small">
         Les modifications de nom et de prix sont enregistrées dès que vous quittez la case.
         Les ventes déjà encaissées gardent le prix pratiqué au moment de la vente.
+        @if (evenement.LieeAHelloAsso)
+        {
+            <br />
+            <text>
+                Le stock est la quantité totale prévue pour la journée : les articles prépayés sur
+                HelloAsso en sont déduits, pour que la caisse ne vende pas ceux qui sont déjà payés.
+            </text>
+        }
     </p>
 
     <hr class="my-4" />
@@ -231,6 +323,14 @@ else
     private int? suppressionId;
     private bool suppressionEvenement;
 
+    private Dictionary<int, int> prevendus = [];
+    private List<CampagneHelloAsso>? campagnes;
+    private string? campagneChoisie;
+    private bool helloAssoEnCours;
+    private bool delierDemande;
+    private string? helloAssoMessage;
+    private string? helloAssoErreur;
+
     protected override async Task OnParametersSetAsync() => await ChargerAsync();
 
     private async Task ChargerAsync()
@@ -239,6 +339,56 @@ else
         introuvable = evenement is null;
         produits = evenement?.Produits.OrderBy(p => p.Ordre).ThenBy(p => p.Id).ToList() ?? [];
         stocks = evenement is null ? [] : await Service.StocksRestantsAsync(Id);
+        prevendus = evenement is null ? [] : await Service.PrevendusAsync(Id);
+    }
+
+    private Task ChargerCampagnesAsync() => HelloAssoAsync(async () =>
+    {
+        campagnes = (await HelloAsso.ListerCampagnesAsync())
+            .Where(c => c.VendDesArticles)
+            .OrderByDescending(c => c.StartDate ?? DateTimeOffset.MinValue)
+            .ToList();
+        campagneChoisie = null;
+        if (campagnes.Count == 0) helloAssoErreur = "Aucune billetterie ni boutique sur HelloAsso.";
+    });
+
+    private Task LierAsync() => HelloAssoAsync(async () =>
+    {
+        var campagne = campagnes?.FirstOrDefault(c => $"{c.FormType}/{c.FormSlug}" == campagneChoisie);
+        if (campagne is null) return;
+        helloAssoMessage = PreCommandes.Bilan(await Synchro.LierAsync(Id, campagne));
+        campagnes = null;
+    });
+
+    private Task SynchroniserAsync() => HelloAssoAsync(async () =>
+        helloAssoMessage = PreCommandes.Bilan(await Synchro.SynchroniserAsync(Id)));
+
+    private async Task DelierAsync()
+    {
+        delierDemande = false;
+        await Synchro.DelierAsync(Id);
+        helloAssoMessage = null;
+        await ChargerAsync();
+    }
+
+    private async Task HelloAssoAsync(Func<Task> action)
+    {
+        helloAssoEnCours = true;
+        helloAssoMessage = null;
+        helloAssoErreur = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (ex is HelloAssoException or InvalidOperationException)
+        {
+            helloAssoErreur = ex.Message;
+        }
+        finally
+        {
+            helloAssoEnCours = false;
+            await ChargerAsync();
+        }
     }
 
     /// <summary>Une case vide signifie « produit non compté », pas « stock nul ».</summary>
