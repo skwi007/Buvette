@@ -70,6 +70,12 @@ public record ArticleHelloAsso(
 
     /// <summary>Un don ajouté au panier est de l'argent, pas un article à remettre.</summary>
     public bool EstUnDon => Type is "Donation";
+
+    /// <summary>
+    /// Le nom à afficher. HelloAsso n'envoie aucun nom pour un don ajouté au panier, et garde
+    /// les espaces tapés en trop autour des noms d'articles dans le back-office.
+    /// </summary>
+    public string Libelle => Name?.Trim() is { Length: > 0 } nom ? nom : EstUnDon ? "Don" : "(sans nom)";
 }
 
 public record OptionHelloAsso(string? Name, int Amount);

@@ -97,7 +97,7 @@
     var valides = commandes.Where(c => !EstAnnulee(c)).ToList();
     var articles = valides.SelectMany(c => c.Items ?? [])
         .Where(a => !ArticleAnnule(a))
-        .GroupBy(a => a.Name ?? "(sans nom)")
+        .GroupBy(a => a.Libelle)
         .Select(g => (Nom: g.Key, Quantite: g.Count(), Montant: g.Sum(a => a.Montant)))
         .OrderBy(a => a.Nom)
         .ToList();
@@ -134,7 +134,7 @@
                         <td class="small">@c.Date.ToLocalTime().ToString("g")</td>
                         <td>@c.Payer?.LastName?.ToUpperInvariant() @c.Payer?.FirstName</td>
                         <td class="small">
-                            @string.Join(", ", (c.Items ?? []).GroupBy(a => a.Name).Select(g => g.Count() > 1 ? $"{g.Count()} × {g.Key}" : g.Key))
+                            @string.Join(", ", (c.Items ?? []).GroupBy(a => a.Libelle).Select(g => g.Count() > 1 ? $"{g.Count()} × {g.Key}" : g.Key))
                         </td>
                         <td class="text-end">@c.Total.ToString("C")</td>
                     </tr>

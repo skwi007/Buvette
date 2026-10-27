@@ -120,6 +120,22 @@ public class HelloAssoClientTests
         Assert.Equal("Muller", commande.Payer!.LastName);
     }
 
+    [Fact]
+    public async Task Un_don_sans_nom_s_affiche_comme_un_don_et_les_espaces_en_trop_disparaissent()
+    {
+        // Forme réelle d'une commande Saint-Martin : le don n'a ni nom ni tarif.
+        var serveur = new FauxHelloAsso(r => EstJeton(r) ? Jeton() : Json("""
+            {"data":[{"id":196312977,"date":"2026-10-22T12:54:00+02:00",
+              "amount":{"total":1100},
+              "items":[{"id":1,"name":"Tarte flambée nature ","amount":900,"type":"Registration","tierId":102,"state":"Processed"},
+                       {"id":2,"amount":200,"type":"Donation","priceCategory":"Fixed","state":"Processed"}]}]}
+            """));
+
+        var commande = Assert.Single(await Client(serveur).ListerCommandesAsync("Event", "saint-martin"));
+
+        Assert.Equal(["Tarte flambée nature", "Don"], commande.Items!.Select(a => a.Libelle));
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.BadRequest, "identifiant ou le secret")]
     [InlineData(HttpStatusCode.Unauthorized, "identifiant ou le secret")]
