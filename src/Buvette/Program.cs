@@ -71,6 +71,8 @@ if (protegee)
     // redémarrage du serveur déconnecterait toutes les tablettes.
     builder.Services.AddDataProtection()
         .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, "cles")));
+    // Singleton : les essais de toutes les connexions doivent être comptés ensemble.
+    builder.Services.AddSingleton<EssaisDeConnexion>();
 }
 
 var app = builder.Build();
@@ -109,20 +111,24 @@ app.MapStaticAssets().AllowAnonymous();
 
 if (protegee)
 {
-    app.MapGet("/connexion", (string? returnUrl, string? erreur) =>
-            Results.Content(PageConnexion(returnUrl, erreur is not null), "text/html; charset=utf-8"))
+    app.MapGet("/connexion", (string? returnUrl, string? erreur, int? attente) =>
+            Results.Content(PageConnexion(returnUrl, erreur is not null, attente), "text/html; charset=utf-8"))
         .AllowAnonymous();
 
-    app.MapPost("/connexion", async (HttpContext http) =>
+    app.MapPost("/connexion", async (HttpContext http, EssaisDeConnexion essais) =>
     {
         var formulaire = await http.Request.ReadFormAsync();
         var retour = AccesProtege.RetourSur(formulaire["returnUrl"]);
 
-        if (!AccesProtege.Verifier(formulaire["motDePasse"], motDePasse!))
+        // Derrière Caddy, l'adresse est celle du visiteur grâce à UseForwardedHeaders.
+        var issue = essais.Essayer(http.Connection.RemoteIpAddress, formulaire["motDePasse"], motDePasse!);
+        if (!issue.Accepte)
         {
-            // Une seconde de pénalité : rend inutile l'essai de milliers de mots de passe.
+            // Une seconde de pénalité freine les essais un par un ; EssaisDeConnexion arrête
+            // ceux qui arrivent en nombre ou en parallèle.
             await Task.Delay(TimeSpan.FromSeconds(1));
-            return Results.Redirect($"/connexion?erreur=1&returnUrl={Uri.EscapeDataString(retour)}");
+            var motif = issue.Bloque ? $"attente={(int)Math.Ceiling(issue.Attente.TotalMinutes)}" : "erreur=1";
+            return Results.Redirect($"/connexion?{motif}&returnUrl={Uri.EscapeDataString(retour)}");
         }
 
         var identite = new ClaimsIdentity([new Claim(ClaimTypes.Name, "benevole")],
@@ -200,12 +206,14 @@ AfficherAdressesReseau(app);
 app.Run();
 
 // Page volontairement hors Blazor : elle doit s'afficher avant toute connexion temps réel.
-static string PageConnexion(string? retour, bool erreur)
+static string PageConnexion(string? retour, bool erreur, int? attente)
 {
     var champRetour = WebUtility.HtmlEncode(AccesProtege.RetourSur(retour));
-    var message = erreur
-        ? """<div class="alert alert-danger">Mot de passe incorrect.</div>"""
-        : "";
+    var message = attente is int minutes and > 0
+        ? $"""<div class="alert alert-warning">Trop d'essais : réessayez dans {minutes} minute{(minutes > 1 ? "s" : "")}.</div>"""
+        : erreur
+            ? """<div class="alert alert-danger">Mot de passe incorrect.</div>"""
+            : "";
     return $$"""
         <!DOCTYPE html>
         <html lang="fr">

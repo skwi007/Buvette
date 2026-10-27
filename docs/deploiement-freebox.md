@@ -262,9 +262,14 @@ Résultat attendu : `O = Let's Encrypt`, avec une date d'expiration à environ t
 - **Connexion mémorisée un mois** sur chaque appareil, grâce à un cookie. Les clés qui le
   chiffrent sont conservées dans `/opt/buvette/app/cles/` : un redémarrage ne déconnecte
   personne.
-- **Une seconde de pénalité** à chaque erreur, pour décourager les essais en masse. Des
-  robots visitent tout site public dans les secondes qui suivent sa mise en ligne : éviter
-  un mot de passe trop évident comme `buvette`.
+- **Essais limités** : une seconde de pénalité à chaque erreur, et après **10 erreurs en un
+  quart d'heure depuis une même adresse**, cette adresse doit attendre (la page de connexion
+  indique combien de minutes). Au-delà de **50 erreurs en un quart d'heure, toutes adresses
+  confondues** (un robot qui changerait d'adresse), plus aucune nouvelle connexion n'est
+  acceptée le temps que ça se calme ; les appareils déjà connectés ne sont pas concernés.
+  Une connexion réussie efface les erreurs de son adresse. Des robots visitent tout site
+  public dans les secondes qui suivent sa mise en ligne : éviter un mot de passe trop
+  évident comme `buvette`.
 - Le lien **Se déconnecter** apparaît en haut à droite quand le mot de passe est actif.
 
 ### Changer le mot de passe
@@ -376,4 +381,5 @@ suffit à la remettre en ligne.
 | La page s'affiche mais les boutons ne répondent pas | La connexion temps réel (WebSocket) ne passe pas : souvent un réseau d'entreprise ou un Wi-Fi public filtrant. Essayer en 4G. |
 | « Reconnexion… » fréquent | Réseau mobile instable : c'est la limite de Blazor Server, et la raison de garder le PC sur place le jour J. |
 | Mot de passe refusé alors qu'il est correct | Vérifier `/etc/buvette.env` (pas de guillemets ni d'espace parasite) et redémarrer le service. |
+| « Trop d'essais : réessayez dans N minutes » | Trop d'erreurs depuis cette adresse, ou depuis Internet en général (voir [Le mot de passe](#le-mot-de-passe)). Attendre, ou redémarrer l'application, qui oublie les erreurs comptées : `ssh freebox@192.168.1.6 "sudo systemctl restart buvette"`. |
 | Tout le monde est déconnecté après une mise à jour | Le dossier `/opt/buvette/app/cles/` a été supprimé : se reconnecter suffit. |
