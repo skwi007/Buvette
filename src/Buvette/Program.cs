@@ -222,7 +222,7 @@ static string PageConnexion(string? retour, bool erreur, int? attente)
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
             <title>Connexion – Buvette</title>
             <link rel="stylesheet" href="/lib/bootstrap/dist/css/bootstrap.min.css" />
-            <link rel="icon" type="image/png" href="/favicon.png" />
+            <link rel="icon" type="image/png" href="/logo-ptitscoeurs.png" />
         </head>
         <body class="d-flex align-items-center justify-content-center" style="min-height:100vh">
             <form method="post" action="/connexion" class="card p-4 shadow-sm" style="width:100%;max-width:22rem">

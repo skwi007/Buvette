@@ -240,7 +240,7 @@ l'association n'ont pas à être publiées avec le code.
 dotnet test
 ```
 
-182 tests xUnit couvrent les règles métier, dans `tests/Buvette.Tests/`.
+204 tests xUnit couvrent les règles métier, dans `tests/Buvette.Tests/`.
 Ils tournent sur un vrai moteur SQLite, recréé pour chaque test : les cascades de
 suppression, les migrations et le stockage des montants sont donc réellement exercés,
 pas simulés. Les tests de concurrence utilisent un fichier temporaire, seule façon de
@@ -256,6 +256,21 @@ Ils couvrent en priorité les points où une erreur coûterait de l'argent à l'
 - l'impossibilité de vendre plus que le stock, même depuis plusieurs caisses à la fois ;
 - les gratuités hors recette mais bien décomptées du stock ;
 - le calcul de l'écart de caisse et son signe.
+
+### Tests dans le navigateur
+
+`tests/Buvette.E2E/` pilote l'application dans un vrai Chromium avec Playwright : création
+d'un événement et de sa carte, encaissement et monnaie à rendre, consommations offertes,
+stock épuisé, mise à jour en direct entre deux caisses, comptage du tiroir, export CSV,
+connexion par mot de passe et icône de l'onglet. L'application démarre sur un port libre
+avec une base temporaire : la base de l'association n'est jamais touchée, et HelloAsso
+n'est jamais appelé.
+
+Une seule fois par poste, après la première compilation, installer le navigateur :
+
+```powershell
+pwsh tests/Buvette.E2E/bin/Debug/net10.0/playwright.ps1 install chromium
+```
 
 ## Structure
 
@@ -278,6 +293,7 @@ Ils couvrent en priorité les points où une erreur coûterait de l'argent à l'
 | `src/Buvette/Components/Pages/Caisse.razor` | Écran de vente |
 | `src/Buvette/Components/Pages/Historique.razor` | Récapitulatif et détail des commandes |
 | `tests/Buvette.Tests/` | Tests xUnit des règles métier |
+| `tests/Buvette.E2E/` | Tests Playwright des écrans, dans un vrai navigateur |
 
 ## Faire évoluer le schéma
 

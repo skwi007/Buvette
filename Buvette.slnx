@@ -3,6 +3,7 @@
     <Project Path="src/Buvette/Buvette.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Buvette.E2E/Buvette.E2E.csproj" />
     <Project Path="tests/Buvette.Tests/Buvette.Tests.csproj" />
   </Folder>
 </Solution>
