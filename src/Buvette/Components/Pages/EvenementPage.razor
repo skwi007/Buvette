@@ -43,21 +43,27 @@ else
             <EditForm Model="evenement" OnValidSubmit="EnregistrerEvenementAsync" FormName="reglages">
                 <DataAnnotationsValidator />
                 <div class="row g-3 align-items-end">
-                    <div class="col-md-5">
+                    <div class="col-md-6 col-lg-4">
                         <label class="form-label" for="ev-nom">Nom</label>
                         <InputText id="ev-nom" class="form-control" @bind-Value="evenement.Nom" />
                         <ValidationMessage For="() => evenement.Nom" class="text-danger small" />
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-6 col-lg-2">
                         <label class="form-label" for="ev-date">Date</label>
                         <InputDate id="ev-date" class="form-control" @bind-Value="evenement.Date" />
                     </div>
-                    <div class="col-md-2">
+                    <div class="col-6 col-lg-2">
                         <label class="form-label" for="ev-fond">Fond de caisse (€)</label>
                         <InputNumber id="ev-fond" class="form-control" @bind-Value="evenement.FondDeCaisse" step="0.01" />
                         <ValidationMessage For="() => evenement.FondDeCaisse" class="text-danger small" />
                     </div>
-                    <div class="col-md-2">
+                    <div class="col-6 col-lg-2">
+                        <label class="form-label" for="ev-consigne">Consigne par verre (€)</label>
+                        <InputNumber id="ev-consigne" class="form-control" @bind-Value="evenement.Consigne" step="0.01"
+                                     placeholder="aucune" />
+                        <ValidationMessage For="() => evenement.Consigne" class="text-danger small" />
+                    </div>
+                    <div class="col-12 col-lg-2">
                         <button type="submit" class="btn btn-success w-100">Enregistrer</button>
                     </div>
                 </div>
@@ -149,13 +155,21 @@ else
         <div class="alert alert-danger">@erreur</div>
     }
 
+    @* Sur téléphone, chaque produit devient une carte (voir .table-produits dans app.css) :
+       en tableau, les sept colonnes réduisaient les cases de saisie à quelques pixels. *@
     <div class="table-responsive">
-        <table class="table align-middle">
+        <table class="table align-middle table-produits">
             <thead>
                 <tr>
                     <th scope="col" style="width:6rem">Ordre</th>
                     <th scope="col">Nom</th>
                     <th scope="col" style="width:9rem">Prix (€)</th>
+                    <th scope="col" style="width:8rem">
+                        Consigné
+                        <span class="text-secondary fw-normal d-block small">
+                            @(evenement.Consigne is > 0 ? $"+ {evenement.Consigne.Value:C2}" : "montant à régler")
+                        </span>
+                    </th>
                     <th scope="col" style="width:9rem">
                         Stock
                         <span class="text-secondary fw-normal d-block small">vide = illimité</span>
@@ -169,7 +183,7 @@ else
                 @foreach (var p in produits)
                 {
                     <tr @key="p.Id">
-                        <td>
+                        <td class="col-ordre" data-label="Ordre">
                             <div class="btn-group btn-group-sm" role="group" aria-label="Réordonner @p.Nom">
                                 <button class="btn btn-outline-secondary" title="Monter"
                                         disabled="@(p == produits[0])" @onclick="() => DeplacerAsync(p.Id, -1)">↑</button>
@@ -177,7 +191,7 @@ else
                                         disabled="@(p == produits[^1])" @onclick="() => DeplacerAsync(p.Id, 1)">↓</button>
                             </div>
                         </td>
-                        <td>
+                        <td class="col-nom">
                             <input class="form-control" value="@p.Nom" aria-label="Nom du produit"
                                    @onchange="e => ModifierNom(p, e.Value?.ToString())" />
                             @if (p.TarifHelloAssoId is not null)
@@ -185,18 +199,25 @@ else
                                 <span class="badge text-bg-info mt-1">aussi vendu sur HelloAsso</span>
                             }
                         </td>
-                        <td>
+                        <td data-label="Prix (€)">
                             <input class="form-control" type="number" step="0.01" min="0" inputmode="decimal"
                                    value="@Prix.PourChamp(p.Prix)" aria-label="Prix de @p.Nom"
                                    @onchange="e => ModifierPrix(p, e.Value?.ToString())" />
                         </td>
-                        <td>
+                        <td data-label="Consigné">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" checked="@p.Consigne"
+                                       aria-label="@p.Nom consigné"
+                                       @onchange="e => BasculerConsigneAsync(p, (bool)e.Value!)" />
+                            </div>
+                        </td>
+                        <td data-label="Stock">
                             <input class="form-control" type="number" step="1" min="0" inputmode="numeric"
                                    placeholder="illimité" value="@(p.StockInitial?.ToString() ?? "")"
                                    aria-label="Stock de @p.Nom"
                                    @onchange="e => ModifierStock(p, e.Value?.ToString())" />
                         </td>
-                        <td>
+                        <td data-label="Restant">
                             @if (p.StockInitial is null)
                             {
                                 <span class="text-secondary">illimité</span>
@@ -213,14 +234,14 @@ else
                                 <span class="d-block small text-secondary">@prevendu prépayé@(prevendu > 1 ? "s" : "") HelloAsso</span>
                             }
                         </td>
-                        <td>
+                        <td data-label="En vente">
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" role="switch" checked="@p.Actif"
                                        aria-label="@p.Nom en vente"
                                        @onchange="e => BasculerActifAsync(p, (bool)e.Value!)" />
                             </div>
                         </td>
-                        <td class="text-end">
+                        <td class="text-end col-actions">
                             @if (suppressionId == p.Id)
                             {
                                 <span class="me-2 small">Supprimer&nbsp;?</span>
@@ -236,27 +257,34 @@ else
                         </td>
                     </tr>
                 }
-                <tr>
-                    <td></td>
-                    <td>
+                <tr class="nouveau-produit">
+                    <td class="col-ordre"></td>
+                    <td class="col-nom" data-label="Nouveau produit">
                         <input class="form-control" placeholder="Tarte flambée nature" aria-label="Nom du nouveau produit"
                                @bind="nouveauNom" @bind:event="oninput" @onkeydown="TouchePressee" />
                     </td>
-                    <td>
+                    <td data-label="Prix (€)">
                         <input class="form-control" type="number" step="0.01" min="0" placeholder="8,00"
                                inputmode="decimal" aria-label="Prix du nouveau produit"
                                value="@Prix.PourChamp(nouveauPrix)"
                                @onchange="e => nouveauPrix = Prix.Analyser(e.Value?.ToString())"
                                @onkeydown="TouchePressee" />
                     </td>
-                    <td>
+                    <td data-label="Consigné">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" checked="@nouveauConsigne"
+                                   aria-label="Nouveau produit consigné"
+                                   @onchange="e => nouveauConsigne = (bool)e.Value!" />
+                        </div>
+                    </td>
+                    <td data-label="Stock">
                         <input class="form-control" type="number" step="1" min="0" placeholder="illimité"
                                inputmode="numeric" aria-label="Stock du nouveau produit"
                                value="@(nouveauStock?.ToString() ?? "")"
                                @onchange="e => nouveauStock = LireStock(e.Value?.ToString())"
                                @onkeydown="TouchePressee" />
                     </td>
-                    <td colspan="3">
+                    <td colspan="3" class="col-actions">
                         <button class="btn btn-success" disabled="@string.IsNullOrWhiteSpace(nouveauNom)"
                                 @onclick="AjouterProduitAsync">
                             + Ajouter
@@ -270,6 +298,15 @@ else
     <p class="text-secondary small">
         Les modifications de nom et de prix sont enregistrées dès que vous quittez la case.
         Les ventes déjà encaissées gardent le prix pratiqué au moment de la vente.
+        <br />
+        La consigne (verre, gobelet), fixée dans les réglages, s'ajoute au prix des produits
+        consignés et se rembourse depuis la caisse quand le client rapporte son verre.
+        @if (evenement.Consigne is not > 0 && produits.Any(p => p.Consigne))
+        {
+            <strong class="text-warning-emphasis">
+                Des produits sont consignés mais aucun montant n'est fixé&nbsp;: ils se vendent sans consigne.
+            </strong>
+        }
         @if (evenement.LieeAHelloAsso)
         {
             <br />
@@ -317,6 +354,7 @@ else
 
     private string nouveauNom = "";
     private decimal? nouveauPrix;
+    private bool nouveauConsigne;
     private int? nouveauStock;
     private Dictionary<int, int> stocks = [];
 
@@ -446,6 +484,12 @@ else
         await Service.EnregistrerProduitAsync(p);
     }
 
+    private async Task BasculerConsigneAsync(Produit p, bool consigne)
+    {
+        p.Consigne = consigne;
+        await Service.EnregistrerProduitAsync(p);
+    }
+
     private async Task BasculerActifAsync(Produit p, bool actif)
     {
         p.Actif = actif;
@@ -475,11 +519,13 @@ else
             EvenementId = Id,
             Nom = nom,
             Prix = prix,
+            Consigne = nouveauConsigne,
             StockInitial = nouveauStock,
         });
 
         nouveauNom = "";
         nouveauPrix = null;
+        nouveauConsigne = false;
         nouveauStock = null;
         await ChargerAsync();
     }

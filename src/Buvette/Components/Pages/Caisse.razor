@@ -74,6 +74,10 @@ else
                         }
                         <span class="produit-nom">@p.Nom</span>
                         <span class="produit-prix">@p.Prix.ToString("C2")</span>
+                        @if (p.AvecConsigne)
+                        {
+                            <span class="produit-consigne">+ @p.Consigne!.Value.ToString("C2") consigne</span>
+                        }
                         @if (p.StockSuivi)
                         {
                             <span class="produit-stock @(disponible == 0 ? "vide" : disponible <= 5 ? "bas" : "")">
@@ -83,19 +87,43 @@ else
                     </button>
                 }
             </div>
+
+            @if (MontantsDeConsigne.Count > 0)
+            {
+                <h2 class="h5 mt-4 mb-2">Verres rapportés</h2>
+                <div class="produits-grille">
+                    @foreach (var montant in MontantsDeConsigne)
+                    {
+                        var nombre = Rendus(montant);
+                        var restants = RenduPossible(montant);
+                        <button type="button" class="produit-bouton retour-bouton @(nombre > 0 ? "actif" : "")"
+                                disabled="@(evenement.Cloture || restants == 0)" @onclick="() => AjouterRendu(montant)">
+                            @if (nombre > 0)
+                            {
+                                <span class="produit-badge">@nombre</span>
+                            }
+                            <span class="produit-nom">Verre rendu</span>
+                            <span class="produit-prix">− @montant.ToString("C2")</span>
+                            <span class="produit-stock">
+                                @(restants == 0 ? "aucun verre à rembourser" : $"{restants} chez les clients")
+                            </span>
+                        </button>
+                    }
+                </div>
+            }
         </div>
 
         <div class="col-lg-4">
             <div class="card panier">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span class="fw-semibold">Commande en cours</span>
-                    @if (Lignes.Count > 0)
+                    @if (!PanierVide)
                     {
                         <button class="btn btn-sm btn-outline-danger" @onclick="Vider">Tout effacer</button>
                     }
                 </div>
 
-                @if (Lignes.Count == 0)
+                @if (PanierVide)
                 {
                     <div class="card-body text-secondary">
                         Touchez un produit pour commencer la commande.
@@ -125,6 +153,39 @@ else
                                 </div>
                             </li>
                         }
+                        @if (TotalConsignes > 0)
+                        {
+                            <li class="list-group-item ligne-consigne">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <div class="flex-grow-1">
+                                        <div class="fw-semibold">Consigne</div>
+                                        <div class="text-secondary small">
+                                            @VerresConsignes verre@(VerresConsignes > 1 ? "s" : ""), rendue au retour
+                                        </div>
+                                    </div>
+                                    <div class="text-end sous-total">+ @TotalConsignes.ToString("C2")</div>
+                                </div>
+                            </li>
+                        }
+                        @foreach (var (montant, nombre) in rendus.OrderBy(r => r.Key))
+                        {
+                            <li class="list-group-item ligne-consigne" @key="montant">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <div class="flex-grow-1">
+                                        <div class="fw-semibold">Verre@(nombre > 1 ? "s" : "") rendu@(nombre > 1 ? "s" : "")</div>
+                                        <div class="text-secondary small">@nombre × @montant.ToString("C2")</div>
+                                    </div>
+                                    <div class="btn-group" role="group" aria-label="Verres rendus à @montant.ToString("C2")">
+                                        <button class="btn btn-outline-secondary" @onclick="() => RetirerRendu(montant)"
+                                                aria-label="Un verre rendu de moins">−</button>
+                                        <span class="btn btn-light disabled quantite">@nombre</span>
+                                        <button class="btn btn-outline-secondary" @onclick="() => AjouterRendu(montant)"
+                                                aria-label="Un verre rendu de plus">+</button>
+                                    </div>
+                                    <div class="text-end sous-total">− @((montant * nombre).ToString("C2"))</div>
+                                </div>
+                            </li>
+                        }
                     </ul>
                 }
 
@@ -137,12 +198,31 @@ else
                         </label>
                     </div>
 
+                    @if (offerte && AEncaisser != 0)
+                    {
+                        <div class="d-flex justify-content-between align-items-baseline mb-2 text-secondary">
+                            <span>Valeur offerte</span>
+                            <span class="fw-semibold">@Total.ToString("C2")</span>
+                        </div>
+                    }
+
                     <div class="d-flex justify-content-between align-items-baseline mb-3">
-                        <span class="fs-5">@(offerte ? "Valeur offerte" : "Total à payer")</span>
-                        <span class="total @(offerte ? "offert" : "")">@Total.ToString("C2")</span>
+                        <span class="fs-5">
+                            @(ARembourser ? "À rembourser au client" : offerte && AEncaisser == 0 ? "Valeur offerte" : "Total à payer")
+                        </span>
+                        <span class="total @(ARembourser ? "rembourse" : offerte && AEncaisser == 0 ? "offert" : "")">
+                            @((offerte && AEncaisser == 0 ? Total : Math.Abs(AEncaisser)).ToString("C2"))
+                        </span>
                     </div>
 
-                    @if (offerte)
+                    @if (ARembourser)
+                    {
+                        <div class="alert alert-info py-2 mb-3">
+                            Rendez <strong class="fs-4">@((-AEncaisser).ToString("C2"))</strong> au client
+                            pour ses verres rapportés.
+                        </div>
+                    }
+                    else if (offerte && AEncaisser == 0)
                     {
                         <div class="alert alert-secondary py-2 mb-3">
                             Rien à encaisser. Le stock est décompté, mais cette commande
@@ -151,32 +231,42 @@ else
                     }
                     else
                     {
+                        @if (offerte)
+                        {
+                            <div class="alert alert-secondary py-2 mb-3">
+                                Les consommations sont offertes, mais pas la consigne&nbsp;: elle sera
+                                rendue avec le verre.
+                            </div>
+                        }
                         <label class="form-label" for="recu">Montant reçu (facultatif)</label>
                         <input id="recu" class="form-control form-control-lg mb-2" type="number" step="0.01" min="0"
                                inputmode="decimal" value="@Prix.PourChamp(recu)"
                                @onchange="e => recu = Prix.Analyser(e.Value?.ToString())" />
 
-                        @if (recu is decimal montant && Total > 0)
+                        @if (recu is decimal montant && AEncaisser > 0)
                         {
-                            @if (montant >= Total)
+                            @if (montant >= AEncaisser)
                             {
                                 <div class="alert alert-info py-2 mb-3">
-                                    À rendre : <strong class="fs-4">@((montant - Total).ToString("C2"))</strong>
+                                    À rendre : <strong class="fs-4">@((montant - AEncaisser).ToString("C2"))</strong>
                                 </div>
                             }
                             else
                             {
                                 <div class="alert alert-warning py-2 mb-3">
-                                    Il manque @((Total - montant).ToString("C2")).
+                                    Il manque @((AEncaisser - montant).ToString("C2")).
                                 </div>
                             }
                         }
                     }
 
                     <button class="btn btn-lg w-100 @(offerte ? "btn-secondary" : "btn-success")"
-                            disabled="@(Lignes.Count == 0 || evenement.Cloture || encaissementEnCours)"
+                            disabled="@(PanierVide || evenement.Cloture || encaissementEnCours)"
                             @onclick="EncaisserAsync">
-                        @(encaissementEnCours ? "Enregistrement…" : offerte ? "Valider l'offert" : "Encaisser")
+                        @(encaissementEnCours ? "Enregistrement…"
+                          : Lignes.Count == 0 && rendus.Count > 0 ? "Rembourser les verres"
+                          : offerte ? "Valider l'offert"
+                          : "Encaisser")
                     </button>
                 </div>
             </div>
@@ -192,6 +282,9 @@ else
     private bool introuvable;
 
     private readonly Dictionary<int, int> panier = [];
+    /// <summary>Verres rapportés dans ce passage, par montant de consigne.</summary>
+    private readonly Dictionary<decimal, int> rendus = [];
+    private Dictionary<decimal, int> enCirculation = [];
     private decimal? recu;
     private bool offerte;
 
@@ -204,7 +297,35 @@ else
                 .Select(p => (p, Quantite(p.Id)))
                 .ToList();
 
+    /// <summary>Valeur des articles, hors consigne : c'est elle qui entre dans la recette.</summary>
     private decimal Total => Lignes.Sum(l => l.Produit.Prix * l.Quantite);
+
+    private int VerresConsignes => Lignes.Where(l => l.Produit.AvecConsigne).Sum(l => l.Quantite);
+
+    private decimal TotalConsignes => Lignes.Sum(l => (l.Produit.Consigne ?? 0m) * l.Quantite);
+
+    private decimal TotalRendus => rendus.Sum(r => r.Key * r.Value);
+
+    /// <summary>
+    /// Ce que le client doit donner : négatif quand ses verres rapportés valent plus que
+    /// ce qu'il achète. La consigne reste due sur une commande offerte (voir <see cref="Commande.Consignes"/>).
+    /// </summary>
+    private decimal AEncaisser => (offerte ? 0m : Total) + TotalConsignes - TotalRendus;
+
+    private bool ARembourser => AEncaisser < 0;
+
+    private bool PanierVide => Lignes.Count == 0 && rendus.Count == 0;
+
+    /// <summary>
+    /// Un bouton « verre rendu » par montant de consigne : celui des produits en vente, et
+    /// celui des verres encore dehors même si leur produit a été retiré de la carte.
+    /// </summary>
+    private List<decimal> MontantsDeConsigne =>
+        produits.Where(p => p.AvecConsigne).Select(p => p.Consigne!.Value)
+            .Concat(enCirculation.Where(c => c.Value > 0).Select(c => c.Key))
+            .Distinct()
+            .Order()
+            .ToList();
 
     protected override void OnInitialized() => Notifications.EvenementModifie += SurEvenementModifie;
 
@@ -215,6 +336,7 @@ else
         evenement = await Service.ChargerEvenementAsync(Id);
         introuvable = evenement is null;
         produits = evenement is null ? [] : await Service.ProduitsEnVenteAsync(Id);
+        enCirculation = evenement is null ? [] : await Service.VerresEnCirculationAsync(Id);
     }
 
     /// <summary>
@@ -273,6 +395,13 @@ else
             }
         }
 
+        foreach (var (montant, nombre) in rendus)
+        {
+            if (nombre > enCirculation.GetValueOrDefault(montant))
+                alertes.Add($"Une autre caisse vient de rembourser des verres à {montant:C2} : "
+                          + "vérifiez le nombre de verres rapportés.");
+        }
+
         if (alertes.Count > 0) erreur = string.Join(" ", alertes);
     }
 
@@ -309,9 +438,36 @@ else
         else panier.Remove(produitId);
     }
 
+    private int Rendus(decimal montant) => rendus.GetValueOrDefault(montant);
+
+    /// <summary>Verres encore remboursables, une fois déduits ceux déjà notés dans ce passage.</summary>
+    private int RenduPossible(decimal montant) =>
+        Math.Max(0, enCirculation.GetValueOrDefault(montant) - Rendus(montant));
+
+    private void AjouterRendu(decimal montant)
+    {
+        if (RenduPossible(montant) == 0)
+        {
+            erreur = $"Aucun autre verre consigné à {montant:C2} n'a été vendu : rien de plus à rembourser.";
+            return;
+        }
+
+        erreur = null;
+        rendus[montant] = Rendus(montant) + 1;
+        message = null;
+    }
+
+    private void RetirerRendu(decimal montant)
+    {
+        var restant = Rendus(montant) - 1;
+        if (restant > 0) rendus[montant] = restant;
+        else rendus.Remove(montant);
+    }
+
     private void Vider()
     {
         panier.Clear();
+        rendus.Clear();
         recu = null;
         erreur = null;
         // « Offert » ne doit jamais rester actif pour le client suivant : l'oubli
@@ -331,21 +487,30 @@ else
         erreur = null;
         try
         {
-            var total = Total;
+            var aEncaisser = AEncaisser;
             var estOfferte = offerte;
-            var rendu = !estOfferte && recu is decimal m && m >= total ? m - total : (decimal?)null;
+            var rendu = aEncaisser > 0 && recu is decimal m && m >= aEncaisser ? m - aEncaisser : (decimal?)null;
 
-            var commande = await Service.EncaisserAsync(Id, panier, estOfferte);
+            var commande = await Service.EncaisserAsync(Id, panier, estOfferte, rendus);
+            var paye = commande.MontantEncaisse;
 
-            message = estOfferte
-                ? $"Commande n° {commande.Id} offerte : {commande.Total:C2} non encaissés."
-                : rendu is decimal r && r > 0
-                    ? $"Commande n° {commande.Id} encaissée : {commande.Total:C2}. À rendre : {r:C2}."
-                    : $"Commande n° {commande.Id} encaissée : {commande.Total:C2}.";
+            message = commande.Lignes.Count == 0
+                ? $"Verres rapportés : {-paye:C2} rendus au client."
+                : paye < 0
+                    ? $"Commande n° {commande.Id} enregistrée : {-paye:C2} à rendre au client pour ses verres."
+                    : estOfferte && paye == 0
+                        ? $"Commande n° {commande.Id} offerte : {commande.Total:C2} non encaissés."
+                        : estOfferte
+                            ? $"Commande n° {commande.Id} offerte : {commande.Total:C2} non encaissés, consigne de {paye:C2} encaissée."
+                            : rendu is decimal r && r > 0
+                                ? $"Commande n° {commande.Id} encaissée : {paye:C2}. À rendre : {r:C2}."
+                                : $"Commande n° {commande.Id} encaissée : {paye:C2}.";
 
             Vider();
-            // Le stock restant vient de changer : les boutons doivent le refléter aussitôt.
+            // Le stock restant et les verres en circulation viennent de changer : les boutons
+            // doivent le refléter aussitôt.
             produits = await Service.ProduitsEnVenteAsync(Id);
+            enCirculation = await Service.VerresEnCirculationAsync(Id);
         }
         catch (InvalidOperationException ex)
         {

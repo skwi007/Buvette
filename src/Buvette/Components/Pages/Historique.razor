@@ -51,6 +51,10 @@ else
                     <div class="chiffre-libelle">Attendu en caisse</div>
                     <div class="chiffre-valeur text-success">@recap.TotalEnCaisse.ToString("C2")</div>
                     <div class="text-secondary small">dont @recap.Evenement.FondDeCaisse.ToString("C2") de fond de caisse</div>
+                    @if (recap.Consignes is { Solde: not 0 } dansLeTiroir)
+                    {
+                        <div class="text-secondary small">et @dansLeTiroir.Solde.ToString("C2") de consignes</div>
+                    }
                 </div>
             </div>
         </div>
@@ -79,6 +83,21 @@ else
                         <div class="chiffre-valeur text-secondary">@recap.TotalOffert.ToString("C2")</div>
                         <div class="text-secondary small">
                             @recap.NombreOffertes commande@(recap.NombreOffertes > 1 ? "s" : ""), hors recette
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        @if (recap.Consignes is { } consignes)
+        {
+            <div class="col-6 col-lg-3">
+                <div class="card chiffre h-100 border-primary-subtle">
+                    <div class="card-body">
+                        <div class="chiffre-libelle">Verres non rendus</div>
+                        <div class="chiffre-valeur">@consignes.VerresEnCirculation</div>
+                        <div class="text-secondary small">
+                            @consignes.Solde.ToString("C2") de consigne en caisse
+                            (@consignes.VerresRendus rendu@(consignes.VerresRendus > 1 ? "s" : "") sur @consignes.VerresSortis)
                         </div>
                     </div>
                 </div>
@@ -193,6 +212,25 @@ else
                             <td colspan="2"></td>
                         }
                     </tr>
+                    @if (recap.Consignes is { VerresSortis: > 0 } mouvements)
+                    {
+                        <tr>
+                            <td colspan="3">Consignes encaissées (@mouvements.VerresSortis verre@(mouvements.VerresSortis > 1 ? "s" : ""))</td>
+                            <td class="text-end">@mouvements.Encaissees.ToString("C2")</td>
+                            @if (recap.TotalOffert > 0)
+                            {
+                                <td colspan="2"></td>
+                            }
+                        </tr>
+                        <tr>
+                            <td colspan="3">Consignes rendues (@mouvements.VerresRendus verre@(mouvements.VerresRendus > 1 ? "s" : ""))</td>
+                            <td class="text-end">− @mouvements.Rendues.ToString("C2")</td>
+                            @if (recap.TotalOffert > 0)
+                            {
+                                <td colspan="2"></td>
+                            }
+                        </tr>
+                    }
                     <tr class="fw-bold fs-5 table-success">
                         <td colspan="3">Montant attendu dans la caisse</td>
                         <td class="text-end">@recap.TotalEnCaisse.ToString("C2")</td>
@@ -276,7 +314,13 @@ else
                            inputmode="decimal" placeholder="@recap.TotalEnCaisse.ToString("0.00")"
                            value="@Prix.PourChamp(montantCompte)"
                            @onchange="e => montantCompte = Prix.Analyser(e.Value?.ToString())" />
-                    <div class="form-text">Fond de caisse et recette compris, tels qu'ils sont dans le tiroir.</div>
+                    <div class="form-text">
+                        Fond de caisse et recette compris, tels qu'ils sont dans le tiroir.
+                        @if (recap.Consignes is { Solde: > 0 } enCaisse)
+                        {
+                            <text>Les @enCaisse.Solde.ToString("C2") de consignes des verres non rendus y sont aussi.</text>
+                        }
+                    </div>
                 </div>
                 <div class="col-md-3">
                     <button class="btn btn-primary btn-lg w-100" @onclick="EnregistrerComptageAsync">
@@ -358,14 +402,26 @@ else
                                 <td>@c.Id</td>
                                 <td>@c.DateHeure.ToString("HH:mm")</td>
                                 <td>
-                                    @string.Join(", ", c.Lignes.Select(l => $"{l.Quantite} × {l.NomProduit}"))
+                                    @string.Join(", ", c.Lignes.Select(l => $"{l.Quantite} × {l.NomProduit}")
+                                        .Concat(c.Retours.Select(r => $"{r.Quantite} verre{(r.Quantite > 1 ? "s" : "")} rendu{(r.Quantite > 1 ? "s" : "")} ({r.MontantUnitaire:C2})")))
                                     @if (c.Offerte)
                                     {
                                         <span class="badge text-bg-secondary ms-2">offert</span>
                                     }
                                 </td>
-                                <td class="text-end @(c.Offerte ? "text-secondary text-decoration-line-through" : "")">
-                                    @c.Total.ToString("C2")
+                                <td class="text-end">
+                                    @if (c.Lignes.Count > 0)
+                                    {
+                                        <span class="@(c.Offerte ? "text-secondary text-decoration-line-through" : "")">@c.Total.ToString("C2")</span>
+                                    }
+                                    @if (c.Consignes > 0)
+                                    {
+                                        <span class="d-block small text-secondary">consigne + @c.Consignes.ToString("C2")</span>
+                                    }
+                                    @if (c.ConsignesRendues > 0)
+                                    {
+                                        <span class="d-block small text-secondary">rendu − @c.ConsignesRendues.ToString("C2")</span>
+                                    }
                                 </td>
                                 <td class="text-end">
                                     @if (annulationId == c.Id)

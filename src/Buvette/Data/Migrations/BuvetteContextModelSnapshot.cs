@@ -23,6 +23,12 @@ namespace Buvette.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<decimal>("Consignes")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ConsignesRendues")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("DateHeure")
                         .HasColumnType("TEXT");
 
@@ -50,6 +56,9 @@ namespace Buvette.Data.Migrations
 
                     b.Property<bool>("Cloture")
                         .HasColumnType("INTEGER");
+
+                    b.Property<decimal?>("Consigne")
+                        .HasColumnType("TEXT");
 
                     b.Property<DateOnly>("Date")
                         .HasColumnType("TEXT");
@@ -89,6 +98,9 @@ namespace Buvette.Data.Migrations
 
                     b.Property<int>("CommandeId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("ConsigneUnitaire")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("NomProduit")
                         .IsRequired()
@@ -196,6 +208,9 @@ namespace Buvette.Data.Migrations
                     b.Property<bool>("Actif")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("Consigne")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("EvenementId")
                         .HasColumnType("INTEGER");
 
@@ -221,6 +236,28 @@ namespace Buvette.Data.Migrations
                     b.HasIndex("EvenementId");
 
                     b.ToTable("Produits");
+                });
+
+            modelBuilder.Entity("Buvette.Data.RetourConsigne", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CommandeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("MontantUnitaire")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Quantite")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommandeId");
+
+                    b.ToTable("RetoursConsignes");
                 });
 
             modelBuilder.Entity("Buvette.Data.Commande", b =>
@@ -292,9 +329,22 @@ namespace Buvette.Data.Migrations
                     b.Navigation("Evenement");
                 });
 
+            modelBuilder.Entity("Buvette.Data.RetourConsigne", b =>
+                {
+                    b.HasOne("Buvette.Data.Commande", "Commande")
+                        .WithMany("Retours")
+                        .HasForeignKey("CommandeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Commande");
+                });
+
             modelBuilder.Entity("Buvette.Data.Commande", b =>
                 {
                     b.Navigation("Lignes");
+
+                    b.Navigation("Retours");
                 });
 
             modelBuilder.Entity("Buvette.Data.Evenement", b =>

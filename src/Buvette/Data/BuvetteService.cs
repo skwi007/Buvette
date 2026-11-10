@@ -24,8 +24,10 @@ public record LigneRecap(
 /// Un produit tel que l'écran de caisse en a besoin : son tarif et ce qu'il en reste.
 /// <paramref name="StockRestant"/> vaut <c>null</c> quand le produit n'est pas compté.
 /// </summary>
-public record ProduitEnVente(int Id, string Nom, decimal Prix, int? StockRestant)
+public record ProduitEnVente(int Id, string Nom, decimal Prix, int? StockRestant, decimal? Consigne = null)
 {
+    public bool AvecConsigne => Consigne is > 0;
+
     public bool StockSuivi => StockRestant is not null;
 
     public bool Epuise => StockRestant is 0;
@@ -42,13 +44,15 @@ public record Recapitulatif(
     decimal TotalVentes,
     int NombreOffertes,
     decimal TotalOffert,
-    ResumeHelloAsso? HelloAsso = null)
+    ResumeHelloAsso? HelloAsso = null,
+    ResumeConsignes? Consignes = null)
 {
     /// <summary>
     /// Ce qui doit se trouver physiquement dans la caisse : fond de caisse + recettes du
-    /// comptoir. Les préventes HelloAsso n'y sont pas : leur argent est sur le compte.
+    /// comptoir + consignes des verres pas encore rapportés. Les préventes HelloAsso n'y
+    /// sont pas : leur argent est sur le compte.
     /// </summary>
-    public decimal TotalEnCaisse => Evenement.FondDeCaisse + TotalVentes;
+    public decimal TotalEnCaisse => Evenement.FondDeCaisse + TotalVentes + (Consignes?.Solde ?? 0m);
 
     /// <summary>Toute la recette de la journée : comptoir et préventes HelloAsso.</summary>
     public decimal RecetteTotale => TotalVentes + (HelloAsso?.Total ?? 0m);
@@ -82,6 +86,27 @@ public record ResumeHelloAsso(
     decimal Total,
     IReadOnlyList<LigneHelloAsso> Articles,
     IReadOnlyList<PreCommande> NonRetirees);
+
+/// <summary>Les verres d'un même montant de consigne : combien sont partis, combien sont revenus.</summary>
+public record LigneConsigne(decimal MontantUnitaire, int Sortis, int Rendus)
+{
+    /// <summary>Verres encore chez les clients, dont la consigne est toujours dans le tiroir.</summary>
+    public int EnCirculation => Sortis - Rendus;
+}
+
+/// <summary>
+/// Le mouvement des consignes d'un événement. <see cref="Solde"/> est l'argent des verres
+/// non rapportés : il reste dans la caisse, et revient à l'association en fin de journée.
+/// </summary>
+public record ResumeConsignes(IReadOnlyList<LigneConsigne> Lignes)
+{
+    public decimal Encaissees => Lignes.Sum(l => l.MontantUnitaire * l.Sortis);
+    public decimal Rendues => Lignes.Sum(l => l.MontantUnitaire * l.Rendus);
+    public decimal Solde => Encaissees - Rendues;
+    public int VerresSortis => Lignes.Sum(l => l.Sortis);
+    public int VerresRendus => Lignes.Sum(l => l.Rendus);
+    public int VerresEnCirculation => Lignes.Sum(l => l.EnCirculation);
+}
 
 /// <summary>
 /// La commande demande plus d'articles qu'il n'en reste. Type dédié pour que l'écran
@@ -139,8 +164,52 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
             .ToListAsync();
 
         var vendus = await VendusParProduitAsync(db, evenementId);
+        var consigne = await db.Evenements
+            .Where(e => e.Id == evenementId)
+            .Select(e => e.Consigne)
+            .FirstOrDefaultAsync();
 
-        return produits.Select(p => new ProduitEnVente(p.Id, p.Nom, p.Prix, Restant(p, vendus))).ToList();
+        return produits
+            .Select(p => new ProduitEnVente(p.Id, p.Nom, p.Prix, Restant(p, vendus), p.Consigne ? consigne : null))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Nombre de verres encore chez les clients pour chaque montant de consigne : la caisse
+    /// ne peut pas rembourser plus de verres qu'elle n'en a fait payer.
+    /// </summary>
+    public async Task<Dictionary<decimal, int>> VerresEnCirculationAsync(int evenementId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        return (await MouvementsConsignesAsync(db, evenementId))
+            .ToDictionary(l => l.MontantUnitaire, l => l.EnCirculation);
+    }
+
+    /// <summary>
+    /// Verres partis et revenus, par montant de consigne. Calculé en mémoire : SQLite stocke
+    /// les décimaux en texte et ne sait ni les comparer ni les sommer sans perte.
+    /// </summary>
+    private static async Task<List<LigneConsigne>> MouvementsConsignesAsync(BuvetteContext db, int evenementId)
+    {
+        var sortis = await db.Lignes
+            .Where(l => l.Commande!.EvenementId == evenementId)
+            .Select(l => new { l.ConsigneUnitaire, l.Quantite })
+            .ToListAsync();
+
+        var rendus = await db.RetoursConsignes
+            .Where(r => r.Commande!.EvenementId == evenementId)
+            .Select(r => new { r.MontantUnitaire, r.Quantite })
+            .ToListAsync();
+
+        return sortis.Where(s => s.ConsigneUnitaire > 0).Select(s => s.ConsigneUnitaire)
+            .Concat(rendus.Select(r => r.MontantUnitaire))
+            .Distinct()
+            .Order()
+            .Select(montant => new LigneConsigne(
+                montant,
+                sortis.Where(s => s.ConsigneUnitaire == montant).Sum(s => s.Quantite),
+                rendus.Where(r => r.MontantUnitaire == montant).Sum(r => r.Quantite)))
+            .ToList();
     }
 
     /// <summary>Stock restant de chaque produit compté, y compris ceux retirés de la vente.</summary>
@@ -202,6 +271,15 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
     public async Task<int> CreerEvenementAsync(Evenement evenement, int? copierProduitsDepuis = null)
     {
         await using var db = await factory.CreateDbContextAsync();
+
+        // Les produits copiés gardent leur case « consigné » : sans le montant qui va avec,
+        // ils seraient vendus sans consigne alors que les gobelets le sont toujours.
+        if (copierProduitsDepuis is int modele && evenement.Consigne is null)
+            evenement.Consigne = await db.Evenements
+                .Where(e => e.Id == modele)
+                .Select(e => e.Consigne)
+                .FirstOrDefaultAsync();
+
         db.Evenements.Add(evenement);
         await db.SaveChangesAsync();
 
@@ -217,6 +295,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
                 EvenementId = evenement.Id,
                 Nom = p.Nom,
                 Prix = p.Prix,
+                Consigne = p.Consigne,
                 Ordre = p.Ordre,
                 Actif = p.Actif,
                 // La quantité prévue se reconduit comme point de départ : c'est en général
@@ -240,6 +319,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
                 .SetProperty(e => e.Nom, evenement.Nom)
                 .SetProperty(e => e.Date, evenement.Date)
                 .SetProperty(e => e.FondDeCaisse, evenement.FondDeCaisse)
+                .SetProperty(e => e.Consigne, evenement.Consigne)
                 .SetProperty(e => e.Cloture, evenement.Cloture));
         notifications.Signaler(evenement.Id);
         // MontantCompte est volontairement absent : il n'appartient pas au formulaire de
@@ -287,6 +367,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
             .ExecuteUpdateAsync(s => s
                 .SetProperty(p => p.Nom, produit.Nom)
                 .SetProperty(p => p.Prix, produit.Prix)
+                .SetProperty(p => p.Consigne, produit.Consigne)
                 .SetProperty(p => p.Actif, produit.Actif)
                 .SetProperty(p => p.StockInitial, produit.StockInitial));
         notifications.Signaler(produit.EvenementId);
@@ -338,8 +419,13 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
     /// tentative, qui relit les stocks à jour et aboutit soit à la vente, soit à un franc
     /// « épuisé ». Sans cette reprise, une vente pourtant possible échouerait.
     /// </remarks>
+    /// <param name="verresRendus">
+    /// Verres consignés rapportés pendant ce passage, par montant de consigne. Un client
+    /// peut ne faire que rendre ses verres : la commande ne contient alors aucun article.
+    /// </param>
     public async Task<Commande> EncaisserAsync(
-        int evenementId, IReadOnlyDictionary<int, int> quantites, bool offerte = false)
+        int evenementId, IReadOnlyDictionary<int, int> quantites, bool offerte = false,
+        IReadOnlyDictionary<decimal, int>? verresRendus = null)
     {
         const int tentativesMax = 5;
 
@@ -347,7 +433,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
         {
             try
             {
-                var commande = await EncaisserUneFoisAsync(evenementId, quantites, offerte);
+                var commande = await EncaisserUneFoisAsync(evenementId, quantites, offerte, verresRendus);
                 notifications.Signaler(evenementId);
                 return commande;
             }
@@ -364,7 +450,8 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
         ex.SqliteErrorCode is 5 or 6;   // SQLITE_BUSY, SQLITE_LOCKED
 
     private async Task<Commande> EncaisserUneFoisAsync(
-        int evenementId, IReadOnlyDictionary<int, int> quantites, bool offerte)
+        int evenementId, IReadOnlyDictionary<int, int> quantites, bool offerte,
+        IReadOnlyDictionary<decimal, int>? verresRendus)
     {
         await using var db = await factory.CreateDbContextAsync();
         await using var transaction = await db.Database.BeginTransactionAsync();
@@ -375,7 +462,11 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
             throw new InvalidOperationException("Cet événement est clôturé : plus aucune vente n'est possible.");
 
         var ids = quantites.Where(q => q.Value > 0).Select(q => q.Key).ToList();
-        if (ids.Count == 0)
+        var rendus = (verresRendus ?? new Dictionary<decimal, int>())
+            .Where(r => r.Value > 0 && r.Key > 0)
+            .OrderBy(r => r.Key)
+            .ToList();
+        if (ids.Count == 0 && rendus.Count == 0)
             throw new InvalidOperationException("La commande est vide.");
 
         var produits = await db.Produits
@@ -400,10 +491,33 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
                 NomProduit = produit.Nom,
                 PrixUnitaire = produit.Prix,
                 Quantite = demande,
+                ConsigneUnitaire = produit.Consigne ? evenement.Consigne ?? 0m : 0m,
             });
         }
 
+        if (rendus.Count > 0)
+        {
+            // Seuls les verres partis lors des passages précédents peuvent revenir : rembourser
+            // plus que ce qui a été encaissé viderait le tiroir d'un argent qui n'y est jamais entré.
+            var enCirculation = (await MouvementsConsignesAsync(db, evenementId))
+                .ToDictionary(l => l.MontantUnitaire, l => l.EnCirculation);
+
+            foreach (var (montant, nombre) in rendus)
+            {
+                var disponibles = Math.Max(0, enCirculation.GetValueOrDefault(montant));
+                if (nombre > disponibles)
+                    throw new InvalidOperationException(disponibles == 0
+                        ? $"Aucun verre consigné à {montant:C2} n'a été vendu sans être rendu : rien à rembourser."
+                        : $"Seulement {disponibles} verre{(disponibles > 1 ? "s" : "")} consigné{(disponibles > 1 ? "s" : "")} à {montant:C2} "
+                          + $"{(disponibles > 1 ? "sont" : "est")} encore chez les clients, pas {nombre}.");
+
+                commande.Retours.Add(new RetourConsigne { MontantUnitaire = montant, Quantite = nombre });
+            }
+        }
+
         commande.Total = commande.Lignes.Sum(l => l.SousTotal);
+        commande.Consignes = commande.Lignes.Sum(l => l.ConsigneUnitaire * l.Quantite);
+        commande.ConsignesRendues = commande.Retours.Sum(r => r.Montant);
 
         db.Commandes.Add(commande);
         await db.SaveChangesAsync();
@@ -417,6 +531,7 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
         return await db.Commandes
             .Where(c => c.EvenementId == evenementId)
             .Include(c => c.Lignes)
+            .Include(c => c.Retours)
             .OrderByDescending(c => c.DateHeure).ThenByDescending(c => c.Id)
             .AsSplitQuery()
             .ToListAsync();
@@ -469,10 +584,14 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
             .ThenBy(r => r.Nom)
             .ToList();
 
+        // Un passage où le client n'a fait que rendre ses verres n'est pas une vente :
+        // le compter ferait baisser le panier moyen sans raison.
         var commandes = await db.Commandes
-            .Where(c => c.EvenementId == evenementId)
+            .Where(c => c.EvenementId == evenementId && c.Lignes.Any())
             .Select(c => c.Offerte)
             .ToListAsync();
+
+        var consignes = await MouvementsConsignesAsync(db, evenementId);
 
         return new Recapitulatif(
             evenement,
@@ -481,7 +600,10 @@ public class BuvetteService(IDbContextFactory<BuvetteContext> factory, Notificat
             recap.Sum(r => r.Montant),
             commandes.Count(offerte => offerte),
             recap.Sum(r => r.MontantOffert),
-            evenement.LieeAHelloAsso ? await ResumeHelloAssoAsync(db, evenementId) : null);
+            evenement.LieeAHelloAsso ? await ResumeHelloAssoAsync(db, evenementId) : null,
+            consignes.Count > 0 || (evenement.Consigne > 0 && evenement.Produits.Any(p => p.Consigne))
+                ? new ResumeConsignes(consignes)
+                : null);
     }
 
     private static async Task<ResumeHelloAsso> ResumeHelloAssoAsync(BuvetteContext db, int evenementId)

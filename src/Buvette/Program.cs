@@ -164,6 +164,12 @@ app.MapGet("/export/{id:int}", async (int id, BuvetteService service) =>
     csv.AppendLine($"Commandes offertes;;;{recap.NombreOffertes}");
     csv.AppendLine($"Valeur offerte (hors recette);;;{recap.TotalOffert:0.00}");
     csv.AppendLine($"Fond de caisse;;;{recap.Evenement.FondDeCaisse:0.00}");
+    if (recap.Consignes is { } consignes)
+    {
+        csv.AppendLine($"Consignes encaissees;;{consignes.VerresSortis};{consignes.Encaissees:0.00}");
+        csv.AppendLine($"Consignes rendues;;{consignes.VerresRendus};{consignes.Rendues:0.00}");
+        csv.AppendLine($"Consignes des verres non rendus;;{consignes.VerresEnCirculation};{consignes.Solde:0.00}");
+    }
     csv.AppendLine($"Total attendu en caisse;;;{recap.TotalEnCaisse:0.00}");
 
     if (recap.Evenement.MontantCompte is decimal compte)

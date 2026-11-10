@@ -8,6 +8,7 @@ public class BuvetteContext(DbContextOptions<BuvetteContext> options) : DbContex
     public DbSet<Produit> Produits => Set<Produit>();
     public DbSet<Commande> Commandes => Set<Commande>();
     public DbSet<LigneCommande> Lignes => Set<LigneCommande>();
+    public DbSet<RetourConsigne> RetoursConsignes => Set<RetourConsigne>();
     public DbSet<PreCommande> PreCommandes => Set<PreCommande>();
     public DbSet<LignePreCommande> LignesPreCommandes => Set<LignePreCommande>();
 
@@ -51,6 +52,11 @@ public class BuvetteContext(DbContextOptions<BuvetteContext> options) : DbContex
         b.Entity<Commande>(e =>
         {
             e.HasMany(x => x.Lignes)
+             .WithOne(x => x.Commande!)
+             .HasForeignKey(x => x.CommandeId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasMany(x => x.Retours)
              .WithOne(x => x.Commande!)
              .HasForeignKey(x => x.CommandeId)
              .OnDelete(DeleteBehavior.Cascade);

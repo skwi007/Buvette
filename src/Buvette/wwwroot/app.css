@@ -152,6 +152,77 @@ h1:focus {
     font-variant-numeric: tabular-nums;
 }
 
+/* ---- Saisie des produits ---- */
+
+/* Sur téléphone, le tableau des produits devient une pile de cartes : en sept colonnes,
+   les cases de prix et de stock étaient trop étroites pour y lire ce qu'on tape. */
+@media (max-width: 767.98px) {
+    .table-produits thead {
+        display: none;
+    }
+
+    .table-produits,
+    .table-produits tbody {
+        display: block;
+    }
+
+    .table.table-produits > tbody > tr {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.6rem 0.75rem;
+        margin-bottom: 0.75rem;
+        padding: 0.75rem;
+        border: 1px solid #d3d9e0;
+        border-radius: 0.75rem;
+        background: #fff;
+    }
+
+    .table.table-produits > tbody > tr.nouveau-produit {
+        border-style: dashed;
+        border-color: #198754;
+    }
+
+    .table.table-produits > tbody > tr > td {
+        display: block;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .table-produits td[data-label]::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 0.2rem;
+        font-size: 0.85rem;
+        color: #5a6673;
+    }
+
+    /* Le nom en tête de carte, sur toute la largeur ; ordre et suppression en pied. */
+    .table-produits .col-nom {
+        grid-column: 1 / -1;
+        order: -1;
+    }
+
+    .table-produits .col-ordre {
+        order: 10;
+    }
+
+    .table-produits .col-actions {
+        order: 11;
+        align-self: end;
+    }
+
+    .table-produits .col-ordre:empty {
+        display: none;
+    }
+
+    .table-produits input.form-control {
+        font-size: 1.1rem;
+        padding: 0.5rem 0.75rem;
+    }
+}
+
 /* ---- Récapitulatif ---- */
 
 .chiffre-libelle {
@@ -190,6 +261,32 @@ h1:focus {
 /* Une commande offerte ne doit pas se confondre visuellement avec un encaissement. */
 .panier .total.offert {
     color: #5a6673;
+}
+
+/* Argent qui sort du tiroir : le bénévole doit voir d'un coup d'œil qu'il rend, et non qu'il reçoit. */
+.panier .total.rembourse {
+    color: #0a58ca;
+}
+
+.panier .ligne-consigne {
+    background: #f6f9fc;
+}
+
+/* ---- Consignes ---- */
+
+.produit-consigne {
+    font-size: 0.85rem;
+    color: #0a58ca;
+}
+
+.retour-bouton {
+    border-color: #b6d4fe;
+    background: #f6f9fc;
+}
+
+.retour-bouton.actif {
+    border-color: #0a58ca;
+    background: #e7f1ff;
 }
 
 /* ---- Pré-commandes HelloAsso ---- */

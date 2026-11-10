@@ -28,6 +28,14 @@ public class Evenement
     public decimal? MontantCompte { get; set; }
 
     /// <summary>
+    /// Consigne d'un verre ou d'un gobelet, la même pour tous les produits consignés de
+    /// l'événement, ou <c>null</c> pour une buvette sans consigne. Ce n'est pas une recette :
+    /// l'argent appartient au client tant qu'il n'a pas rendu le verre.
+    /// </summary>
+    [Range(0, 1000, ErrorMessage = "La consigne doit être comprise entre 0 et 1 000 €.")]
+    public decimal? Consigne { get; set; }
+
+    /// <summary>
     /// Type de la campagne HelloAsso liée (« Event », « Shop »…), ou <c>null</c> pour une
     /// buvette sans prévente. L'API désigne une campagne par ce type et son identifiant.
     /// </summary>
@@ -71,6 +79,12 @@ public class Produit
     [Range(0, 100000, ErrorMessage = "Le stock doit être un nombre positif.")]
     public int? StockInitial { get; set; }
 
+    /// <summary>
+    /// Servi dans un verre consigné : la consigne de l'événement s'ajoute alors au prix,
+    /// et se rend au retour du verre.
+    /// </summary>
+    public bool Consigne { get; set; }
+
     /// <summary>Position du bouton sur l'écran de caisse.</summary>
     public int Ordre { get; set; }
 
@@ -106,7 +120,44 @@ public class Commande
     /// </summary>
     public bool Offerte { get; set; }
 
+    /// <summary>
+    /// Consignes des verres emportés, figées à l'encaissement. Elles restent dues même
+    /// pour une commande offerte : le verre rendu plus tard sera remboursé, et cet argent
+    /// doit donc être entré dans le tiroir.
+    /// </summary>
+    public decimal Consignes { get; set; }
+
+    /// <summary>Consignes remboursées pour les verres rapportés lors de ce passage.</summary>
+    public decimal ConsignesRendues { get; set; }
+
     public List<LigneCommande> Lignes { get; set; } = [];
+    public List<RetourConsigne> Retours { get; set; } = [];
+
+    /// <summary>
+    /// Ce que le client a réellement payé : négatif quand il ne faisait que rapporter
+    /// des verres et que la caisse lui a rendu de l'argent.
+    /// </summary>
+    public decimal MontantEncaisse => (Offerte ? 0m : Total) + Consignes - ConsignesRendues;
+}
+
+/// <summary>
+/// Des verres consignés rapportés lors d'un passage en caisse. Un verre n'est pas rattaché
+/// au produit bu dedans : la bière et le panaché sont servis dans le même gobelet.
+/// </summary>
+/// <remarks>
+/// Le montant est recopié plutôt que relu sur l'événement : si la consigne change en cours
+/// de journée, un verre vendu à l'ancien tarif se rembourse à l'ancien tarif.
+/// </remarks>
+public class RetourConsigne
+{
+    public int Id { get; set; }
+    public int CommandeId { get; set; }
+    public Commande? Commande { get; set; }
+
+    public decimal MontantUnitaire { get; set; }
+    public int Quantite { get; set; }
+
+    public decimal Montant => MontantUnitaire * Quantite;
 }
 
 /// <summary>
@@ -127,6 +178,9 @@ public class LigneCommande
 
     public decimal PrixUnitaire { get; set; }
     public int Quantite { get; set; }
+
+    /// <summary>Consigne par article au moment de la vente, 0 pour un produit sans consigne.</summary>
+    public decimal ConsigneUnitaire { get; set; }
 
     public decimal SousTotal => PrixUnitaire * Quantite;
 }
